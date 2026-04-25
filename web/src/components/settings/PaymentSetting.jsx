@@ -35,7 +35,6 @@ const PaymentSetting = () => {
     PayAddress: '',
     EpayId: '',
     EpayKey: '',
-    Price: 7.3,
     MinTopUp: 1,
     TopupGroupRatio: '',
     CustomCallbackAddress: '',
@@ -104,7 +103,6 @@ const PaymentSetting = () => {
               newInputs['AmountDiscount'] = item.value;
             }
             break;
-          case 'Price':
           case 'MinTopUp':
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':

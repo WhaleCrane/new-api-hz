@@ -222,3 +222,53 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 	storeTaskRequest(c, info, action, req)
 	return nil
 }
+
+func ValidateSeedanceTaskRequest(c *gin.Context, info *RelayInfo) *dto.TaskError {
+	var req SeedanceSubmitReq
+	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
+		return createTaskError(err, "invalid_json", http.StatusBadRequest, true)
+	}
+
+	if strings.TrimSpace(req.Model) == "" {
+		return createTaskError(fmt.Errorf("model field is required"), "missing_model", http.StatusBadRequest, true)
+	}
+
+	if len(req.Content) == 0 {
+		return createTaskError(fmt.Errorf("content array is required"), "missing_content", http.StatusBadRequest, true)
+	}
+
+	hasText := false
+	for _, item := range req.Content {
+		switch item.Type {
+		case "text":
+			if strings.TrimSpace(item.Text) == "" {
+				return createTaskError(fmt.Errorf("text content item must have non-empty text"), "invalid_content", http.StatusBadRequest, true)
+			}
+			hasText = true
+		case "image_url", "video_url", "audio_url", "draft_task":
+			// valid types, URL presence validated by upstream
+		default:
+			return createTaskError(fmt.Errorf("unknown content type: %s", item.Type), "invalid_content_type", http.StatusBadRequest, true)
+		}
+	}
+
+	if !hasText {
+		return createTaskError(fmt.Errorf("content must contain at least one text item"), "missing_text_content", http.StatusBadRequest, true)
+	}
+
+	info.Action = constant.TaskActionGenerate
+	c.Set("seedance_request", req)
+	return nil
+}
+
+func GetSeedanceTaskRequest(c *gin.Context) (SeedanceSubmitReq, error) {
+	v, exists := c.Get("seedance_request")
+	if !exists {
+		return SeedanceSubmitReq{}, fmt.Errorf("seedance request not found in context")
+	}
+	req, ok := v.(SeedanceSubmitReq)
+	if !ok {
+		return SeedanceSubmitReq{}, fmt.Errorf("invalid seedance request type")
+	}
+	return req, nil
+}

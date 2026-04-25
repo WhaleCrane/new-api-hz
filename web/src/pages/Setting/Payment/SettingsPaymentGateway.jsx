@@ -36,7 +36,6 @@ export default function SettingsPaymentGateway(props) {
     PayAddress: '',
     EpayId: '',
     EpayKey: '',
-    Price: 7.3,
     MinTopUp: 1,
   });
   const formApiRef = useRef(null);
@@ -47,10 +46,6 @@ export default function SettingsPaymentGateway(props) {
         PayAddress: props.options.PayAddress || '',
         EpayId: props.options.EpayId || '',
         EpayKey: props.options.EpayKey || '',
-        Price:
-          props.options.Price !== undefined
-            ? parseFloat(props.options.Price)
-            : 7.3,
         MinTopUp:
           props.options.MinTopUp !== undefined
             ? parseFloat(props.options.MinTopUp)
@@ -83,9 +78,6 @@ export default function SettingsPaymentGateway(props) {
       }
       if (inputs.EpayKey !== undefined && inputs.EpayKey !== '') {
         options.push({ key: 'EpayKey', value: inputs.EpayKey });
-      }
-      if (inputs.Price !== '') {
-        options.push({ key: 'Price', value: inputs.Price.toString() });
       }
       if (inputs.MinTopUp !== '') {
         options.push({ key: 'MinTopUp', value: inputs.MinTopUp.toString() });
@@ -161,17 +153,9 @@ export default function SettingsPaymentGateway(props) {
           >
             <Col xs={24} sm={24} md={12} lg={12} xl={12}>
               <Form.InputNumber
-                field='Price'
-                precision={2}
-                label={t('充值价格（x元/美金）')}
-                placeholder={t('例如：7，就是7元/美金')}
-              />
-            </Col>
-            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-              <Form.InputNumber
                 field='MinTopUp'
-                label={t('最低充值美元数量')}
-                placeholder={t('例如：2，就是最低充值2$')}
+                label={t('最低充值数量')}
+                placeholder={t('例如：10，就是最低充值10¥')}
               />
             </Col>
           </Row>

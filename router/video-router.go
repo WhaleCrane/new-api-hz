@@ -31,6 +31,17 @@ func SetVideoRouter(router *gin.Engine) {
 		videoV1Router.GET("/videos/:task_id", controller.RelayTaskFetch)
 	}
 
+	// Seedance 2.0 official API routes - accepts native content array format
+	{
+		videoS1Router := router.Group("/s1")
+		videoS1Router.Use(middleware.RouteTag("relay"))
+		videoS1Router.Use(middleware.TokenAuth(), middleware.Distribute())
+		{
+			videoS1Router.POST("/video/generations", controller.RelayTask)
+			videoS1Router.GET("/video/generations/:task_id", controller.RelayTaskFetch)
+		}
+	}
+
 	klingV1Router := router.Group("/kling/v1")
 	klingV1Router.Use(middleware.RouteTag("relay"))
 	klingV1Router.Use(middleware.KlingRequestConvert(), middleware.TokenAuth(), middleware.Distribute())

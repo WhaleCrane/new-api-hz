@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
@@ -115,6 +116,9 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+		return relaycommon.ValidateSeedanceTaskRequest(c, info)
+	}
 	// Accept only POST /v1/video/generations as "generate" action.
 	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
 }
@@ -134,6 +138,18 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 
 // EstimateBilling 检测请求 metadata 中是否包含视频输入，返回视频折扣 OtherRatio。
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+		req, err := relaycommon.GetSeedanceTaskRequest(c)
+		if err != nil {
+			return nil
+		}
+		if req.HasVideo() {
+			if ratio, ok := GetVideoInputRatio(info.OriginModelName); ok {
+				return map[string]float64{"video_input": ratio}
+			}
+		}
+		return nil
+	}
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil
@@ -177,6 +193,34 @@ func hasVideoInMetadata(metadata map[string]interface{}) bool {
 
 // BuildRequestBody converts request into Doubao specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+		return a.buildSeedanceRequestBody(c, info)
+	}
+	return a.buildStandardRequestBody(c, info)
+}
+
+// buildSeedanceRequestBody passes the Seedance 2.0 official format directly to upstream without conversion.
+func (a *TaskAdaptor) buildSeedanceRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	req, err := relaycommon.GetSeedanceTaskRequest(c)
+	if err != nil {
+		return nil, err
+	}
+
+	if info.IsModelMapped {
+		req.Model = info.UpstreamModelName
+	} else {
+		info.UpstreamModelName = req.Model
+	}
+
+	data, err := common.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(data), nil
+}
+
+// buildStandardRequestBody converts TaskSubmitReq into the Doubao requestPayload format.
+func (a *TaskAdaptor) buildStandardRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil, err

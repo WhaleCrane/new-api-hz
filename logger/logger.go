@@ -122,8 +122,7 @@ func LogQuota(quota int) string {
 	q := float64(quota)
 	switch operation_setting.GetQuotaDisplayType() {
 	case operation_setting.QuotaDisplayTypeCNY:
-		usd := q / common.QuotaPerUnit
-		cny := usd * operation_setting.USDExchangeRate
+		cny := q / common.QuotaPerUnit
 		return fmt.Sprintf("¥%.6f 额度", cny)
 	case operation_setting.QuotaDisplayTypeCustom:
 		usd := q / common.QuotaPerUnit
@@ -139,8 +138,8 @@ func LogQuota(quota int) string {
 		return fmt.Sprintf("%s%.6f 额度", symbol, v)
 	case operation_setting.QuotaDisplayTypeTokens:
 		return fmt.Sprintf("%d 点额度", quota)
-	default: // USD
-		return fmt.Sprintf("＄%.6f 额度", q/common.QuotaPerUnit)
+	default: // CNY (default)
+		return fmt.Sprintf("¥%.6f 额度", q/common.QuotaPerUnit)
 	}
 }
 
@@ -148,8 +147,7 @@ func FormatQuota(quota int) string {
 	q := float64(quota)
 	switch operation_setting.GetQuotaDisplayType() {
 	case operation_setting.QuotaDisplayTypeCNY:
-		usd := q / common.QuotaPerUnit
-		cny := usd * operation_setting.USDExchangeRate
+		cny := q / common.QuotaPerUnit
 		return fmt.Sprintf("¥%.6f", cny)
 	case operation_setting.QuotaDisplayTypeCustom:
 		usd := q / common.QuotaPerUnit
@@ -165,8 +163,8 @@ func FormatQuota(quota int) string {
 		return fmt.Sprintf("%s%.6f", symbol, v)
 	case operation_setting.QuotaDisplayTypeTokens:
 		return fmt.Sprintf("%d", quota)
-	default:
-		return fmt.Sprintf("＄%.6f", q/common.QuotaPerUnit)
+	default: // CNY (default)
+		return fmt.Sprintf("¥%.6f", q/common.QuotaPerUnit)
 	}
 }
 
