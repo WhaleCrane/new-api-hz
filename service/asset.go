@@ -14,16 +14,44 @@ import (
 const arkBaseURL = "https://ark.cn-beijing.volces.com"
 const arkAPIVersion = "2024-01-01"
 
+// resolveChannelForUser 获取平台默认 VolcEngine channel 和用户的 project name
+func resolveChannelForUser(userId int) (*model.Channel, string, error) {
+	mapping, err := model.GetUserAssetGroupMapping(userId)
+	if err != nil {
+		return nil, "", fmt.Errorf("query user mapping failed: %w", err)
+	}
+	if mapping == nil || mapping.ChannelId == 0 {
+		// 用户尚未绑定，尝试获取平台第一个可用的 VolcEngine channel
+		var channels []*model.Channel
+		err := model.DB.Where("type = ? and status = ? limit 1", 45, 1).Find(&channels).Error
+		if err != nil || len(channels) == 0 {
+			return nil, "", fmt.Errorf("no volcengine channel configured, please contact admin")
+		}
+		return channels[0], "default", nil
+	}
+
+	channel, err := model.GetChannelById(mapping.ChannelId, true)
+	if err != nil {
+		return nil, "", fmt.Errorf("get channel failed: %w", err)
+	}
+	projectName := mapping.VolcProjectName
+	if projectName == "" {
+		projectName = "default"
+	}
+	return channel, projectName, nil
+}
+
+type dtoChannelSetting struct {
+	Proxy string `json:"proxy"`
+}
+
 // CallArkAPI 调用火山引擎 Ark API
-// action: 上游 API Action 名称（如 CreateAsset, GetAsset 等）
-// reqBody: 请求体（map 结构，将被 JSON 序列化）
 func CallArkAPI(ctx context.Context, channel *model.Channel, action string, reqBody map[string]any) (map[string]any, error) {
 	accessKey, secretKey, err := ParseVolcengineAssetAuth(channel.Key)
 	if err != nil {
 		return nil, fmt.Errorf("parse volcengine auth failed: %w", err)
 	}
 
-	// 构建请求 URL
 	baseURL := arkBaseURL
 	if channel.BaseURL != nil && *channel.BaseURL != "" {
 		baseURL = *channel.BaseURL
@@ -41,7 +69,6 @@ func CallArkAPI(ctx context.Context, channel *model.Channel, action string, reqB
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 
-	// 签名
 	if err := SignArkRequest(httpReq, accessKey, secretKey); err != nil {
 		return nil, fmt.Errorf("sign request failed: %w", err)
 	}
@@ -82,76 +109,155 @@ func CallArkAPI(ctx context.Context, channel *model.Channel, action string, reqB
 	return result, nil
 }
 
-// BuildArkURL 构建火山引擎 Ark API URL
-func BuildArkURL(channel *model.Channel, action string) string {
-	baseURL := arkBaseURL
-	if channel.BaseURL != nil && *channel.BaseURL != "" {
-		baseURL = *channel.BaseURL
+// CreateUserAssetMapping 在用户完成真人认证后创建映射
+func CreateUserAssetMapping(userId int, groupId string, channelId int, projectName string) (*model.AssetGroupMapping, error) {
+	existing, err := model.GetUserAssetGroupMapping(userId)
+	if err != nil {
+		return nil, err
 	}
-	return fmt.Sprintf("%s/?Action=%s&Version=%s", baseURL, action, arkAPIVersion)
+	if existing != nil {
+		return existing, nil // 已存在，直接返回
+	}
+
+	mapping := &model.AssetGroupMapping{
+		UserId:          userId,
+		GroupId:         groupId,
+		ChannelId:       channelId,
+		VolcProjectName: projectName,
+	}
+	if err := model.InsertAssetGroupMapping(mapping); err != nil {
+		return nil, fmt.Errorf("insert asset group mapping failed: %w", err)
+	}
+	return mapping, nil
 }
 
-// dtoChannelSetting 用于解析 channel.Setting 中的 proxy 字段
-type dtoChannelSetting struct {
-	Proxy string `json:"proxy"`
+// ensureUserMapping 确保用户有映射，无则自动分配 channel
+func ensureUserMapping(ctx context.Context, userId int) (*model.Channel, string, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, "", err
+	}
+	return channel, projectName, nil
 }
 
-// CreateVisualValidateSession 调用 CreateVisualValidateSession API
-func CreateVisualValidateSession(ctx context.Context, channel *model.Channel, callbackURL, projectName string) (map[string]any, error) {
+// GetGroupIDsForUser 获取用户拥有的所有 group IDs，用于自动过滤
+func GetGroupIDsForUser(userId int) ([]string, error) {
+	mapping, err := model.GetUserAssetGroupMapping(userId)
+	if err != nil {
+		return nil, err
+	}
+	if mapping == nil {
+		return nil, fmt.Errorf("user %d has not completed liveness verification yet", userId)
+	}
+	return []string{mapping.GroupId}, nil
+}
+
+// ---- 业务方法 ----
+
+// CreateVisualValidateSession 创建真人认证会话
+func CreateVisualValidateSession(ctx context.Context, userId int, callbackURL string) (map[string]any, error) {
+	channel, projectName, err := ensureUserMapping(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
 		"CallbackURL": callbackURL,
-	}
-	if projectName != "" {
-		reqBody["ProjectName"] = projectName
+		"ProjectName": projectName,
 	}
 	return CallArkAPI(ctx, channel, "CreateVisualValidateSession", reqBody)
 }
 
-// GetVisualValidateResult 调用 GetVisualValidateResult API
-func GetVisualValidateResult(ctx context.Context, channel *model.Channel, bytedToken, projectName string) (map[string]any, error) {
+// GetVisualValidateResult 获取认证结果并自动创建映射
+func GetVisualValidateResult(ctx context.Context, userId int, bytedToken string) (map[string]any, error) {
+	channel, projectName, err := ensureUserMapping(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
-		"BytedToken": bytedToken,
+		"BytedToken":  bytedToken,
+		"ProjectName": projectName,
 	}
-	if projectName != "" {
-		reqBody["ProjectName"] = projectName
+	resp, err := CallArkAPI(ctx, channel, "GetVisualValidateResult", reqBody)
+	if err != nil {
+		return nil, err
 	}
-	return CallArkAPI(ctx, channel, "GetVisualValidateResult", reqBody)
+
+	// 从响应结果中提取 GroupId，创建映射
+	if result, ok := resp["Result"].(map[string]any); ok {
+		if groupId, ok := result["GroupId"].(string); groupId != "" && ok {
+			// 检查是否已有映射
+			existing, _ := model.GetUserAssetGroupMapping(userId)
+			if existing == nil {
+				_, _ = CreateUserAssetMapping(userId, groupId, channel.Id, projectName)
+			}
+		}
+	}
+
+	return resp, nil
 }
 
-// CreateAsset 调用 CreateAsset API
-func CreateAsset(ctx context.Context, channel *model.Channel, groupID, assetURL, assetType, name, projectName string) (map[string]any, error) {
+// CreateAsset 创建素材
+func CreateAsset(ctx context.Context, userId int, groupID, assetURL, assetType, name string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
-		"GroupId":   groupID,
-		"URL":       assetURL,
-		"AssetType": assetType,
+		"GroupId":     groupID,
+		"URL":         assetURL,
+		"AssetType":   assetType,
+		"ProjectName": projectName,
 	}
 	if name != "" {
 		reqBody["Name"] = name
 	}
-	if projectName != "" {
-		reqBody["ProjectName"] = projectName
-	}
 	return CallArkAPI(ctx, channel, "CreateAsset", reqBody)
 }
 
-// ListAssets 调用 ListAssets API
-func ListAssets(ctx context.Context, channel *model.Channel, req *ListAssetsInput) (map[string]any, error) {
-	reqBody := map[string]any{}
+type ListAssetsInput struct {
+	GroupIDs   []string
+	GroupType  string
+	Statuses   []string
+	Name       string
+	PageNumber int
+	PageSize   int
+	SortBy     string
+	SortOrder  string
+}
 
-	if len(req.GroupIDs) > 0 {
-		reqBody["Filter"] = map[string]any{
-			"GroupIds": req.GroupIDs,
-		}
-		filter := reqBody["Filter"].(map[string]any)
-		if req.GroupType != "" {
-			filter["GroupType"] = req.GroupType
-		}
-		if len(req.Statuses) > 0 {
-			filter["Statuses"] = req.Statuses
-		}
-		if req.Name != "" {
-			filter["Name"] = req.Name
-		}
+// ListAssets 查询素材列表（自动按用户隔离）
+func ListAssets(ctx context.Context, userId int, req *ListAssetsInput) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// 自动注入用户拥有的 group IDs
+	userGroupIDs, err := GetGroupIDsForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	reqBody := map[string]any{
+		"Filter": map[string]any{
+			"GroupIds": userGroupIDs,
+		},
+	}
+	filter := reqBody["Filter"].(map[string]any)
+	if req.GroupType != "" {
+		filter["GroupType"] = req.GroupType
+	}
+	if len(req.Statuses) > 0 {
+		filter["Statuses"] = req.Statuses
+	}
+	if req.Name != "" {
+		filter["Name"] = req.Name
+	}
+	if projectName != "" {
+		filter["ProjectName"] = projectName
 	}
 	if req.PageNumber > 0 {
 		reqBody["PageNumber"] = req.PageNumber
@@ -168,19 +274,13 @@ func ListAssets(ctx context.Context, channel *model.Channel, req *ListAssetsInpu
 	return CallArkAPI(ctx, channel, "ListAssets", reqBody)
 }
 
-type ListAssetsInput struct {
-	GroupIDs   []string
-	GroupType  string
-	Statuses   []string
-	Name       string
-	PageNumber int
-	PageSize   int
-	SortBy     string
-	SortOrder  string
-}
+// GetAsset 获取单个素材
+func GetAsset(ctx context.Context, userId int, id string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
 
-// GetAsset 调用 GetAsset API
-func GetAsset(ctx context.Context, channel *model.Channel, id, projectName string) (map[string]any, error) {
 	reqBody := map[string]any{
 		"Id": id,
 	}
@@ -190,8 +290,13 @@ func GetAsset(ctx context.Context, channel *model.Channel, id, projectName strin
 	return CallArkAPI(ctx, channel, "GetAsset", reqBody)
 }
 
-// UpdateAsset 调用 UpdateAsset API
-func UpdateAsset(ctx context.Context, channel *model.Channel, id, name, projectName string) (map[string]any, error) {
+// UpdateAsset 更新素材
+func UpdateAsset(ctx context.Context, userId int, id, name string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
 		"Id": id,
 	}
@@ -204,8 +309,13 @@ func UpdateAsset(ctx context.Context, channel *model.Channel, id, name, projectN
 	return CallArkAPI(ctx, channel, "UpdateAsset", reqBody)
 }
 
-// DeleteAsset 调用 DeleteAsset API
-func DeleteAsset(ctx context.Context, channel *model.Channel, id, projectName string) (map[string]any, error) {
+// DeleteAsset 删除素材
+func DeleteAsset(ctx context.Context, userId int, id string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
 		"Id": id,
 	}
@@ -213,32 +323,6 @@ func DeleteAsset(ctx context.Context, channel *model.Channel, id, projectName st
 		reqBody["ProjectName"] = projectName
 	}
 	return CallArkAPI(ctx, channel, "DeleteAsset", reqBody)
-}
-
-// ListAssetGroups 调用 ListAssetGroups API
-func ListAssetGroups(ctx context.Context, channel *model.Channel, req *ListAssetGroupsInput) (map[string]any, error) {
-	reqBody := map[string]any{}
-
-	if req.Name != "" || len(req.GroupIDs) > 0 || req.GroupType != "" {
-		filter := map[string]any{}
-		if req.Name != "" {
-			filter["Name"] = req.Name
-		}
-		if len(req.GroupIDs) > 0 {
-			filter["GroupIds"] = req.GroupIDs
-		}
-		if req.GroupType != "" {
-			filter["GroupType"] = req.GroupType
-		}
-		reqBody["Filter"] = filter
-	}
-	if req.PageNumber > 0 {
-		reqBody["PageNumber"] = req.PageNumber
-	}
-	if req.PageSize > 0 {
-		reqBody["PageSize"] = req.PageSize
-	}
-	return CallArkAPI(ctx, channel, "ListAssetGroups", reqBody)
 }
 
 type ListAssetGroupsInput struct {
@@ -249,8 +333,50 @@ type ListAssetGroupsInput struct {
 	PageSize   int
 }
 
-// GetAssetGroup 调用 GetAssetGroup API
-func GetAssetGroup(ctx context.Context, channel *model.Channel, id, projectName string) (map[string]any, error) {
+// ListAssetGroups 查询素材组列表（自动按用户隔离）
+func ListAssetGroups(ctx context.Context, userId int, req *ListAssetGroupsInput) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	// 自动注入用户拥有的 group IDs
+	userGroupIDs, err := GetGroupIDsForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	reqBody := map[string]any{
+		"Filter": map[string]any{
+			"GroupIds": userGroupIDs,
+		},
+	}
+	filter := reqBody["Filter"].(map[string]any)
+	if req.Name != "" {
+		filter["Name"] = req.Name
+	}
+	if req.GroupType != "" {
+		filter["GroupType"] = req.GroupType
+	}
+	if projectName != "" {
+		filter["ProjectName"] = projectName
+	}
+	if req.PageNumber > 0 {
+		reqBody["PageNumber"] = req.PageNumber
+	}
+	if req.PageSize > 0 {
+		reqBody["PageSize"] = req.PageSize
+	}
+	return CallArkAPI(ctx, channel, "ListAssetGroups", reqBody)
+}
+
+// GetAssetGroup 获取素材组
+func GetAssetGroup(ctx context.Context, userId int, id string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
 		"Id": id,
 	}
@@ -260,8 +386,13 @@ func GetAssetGroup(ctx context.Context, channel *model.Channel, id, projectName 
 	return CallArkAPI(ctx, channel, "GetAssetGroup", reqBody)
 }
 
-// UpdateAssetGroup 调用 UpdateAssetGroup API
-func UpdateAssetGroup(ctx context.Context, channel *model.Channel, id, name, title, description, projectName string) (map[string]any, error) {
+// UpdateAssetGroup 更新素材组
+func UpdateAssetGroup(ctx context.Context, userId int, id, name, title, description string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
 		"Id": id,
 	}
@@ -280,8 +411,13 @@ func UpdateAssetGroup(ctx context.Context, channel *model.Channel, id, name, tit
 	return CallArkAPI(ctx, channel, "UpdateAssetGroup", reqBody)
 }
 
-// DeleteAssetGroup 调用 DeleteAssetGroup API
-func DeleteAssetGroup(ctx context.Context, channel *model.Channel, id, projectName string) (map[string]any, error) {
+// DeleteAssetGroup 删除素材组
+func DeleteAssetGroup(ctx context.Context, userId int, id string) (map[string]any, error) {
+	channel, projectName, err := resolveChannelForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+
 	reqBody := map[string]any{
 		"Id": id,
 	}

@@ -258,8 +258,7 @@ curl -X GET http://localhost:3000/s1/video/generations/task_7f3a9b2c1d4e5f6a \
 
 ## 注意事项
 
-1. **URL 必须公网可访问** — `image_url`、`video_url`、`audio_url` 中的 URL 必须是火山方舟服务器能访问到的公网地址
+1. **URL 必须公网可访问** — `image_url`、`video_url`、`audio_url` 中的 URL 必须是火山方舟服务器能访问到的公网地址（需自行配置可公网方位URl)
 2. **content 数组必须有 text 项** — 即使只有提示词也必须包含
 3. **角色字段 `role`** — 用于告诉模型该素材的用途（如 `first_frame` 作为首帧、`reference_video` 作为参考视频），不影响必填校验
 4. **异步任务** — 提交后立即返回 `queued` 状态，需通过 `GET /s1/video/generations/:task_id` 轮询结果
-5. **首帧**

@@ -3,20 +3,10 @@ package controller
 import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
-
-func getChannelForAsset(c *gin.Context, channelID int) (*model.Channel, error) {
-	channel, err := model.GetChannelById(channelID, true)
-	if err != nil {
-		common.ApiError(c, err)
-		return nil, err
-	}
-	return channel, nil
-}
 
 // CreateVisualValidateSession 创建真人认证 H5 会话
 func CreateVisualValidateSession(c *gin.Context) {
@@ -25,11 +15,8 @@ func CreateVisualValidateSession(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.CreateVisualValidateSession(c.Request.Context(), channel, req.CallbackURL, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.CreateVisualValidateSession(c.Request.Context(), userId, req.CallbackURL)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -44,11 +31,8 @@ func GetVisualValidateResult(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.GetVisualValidateResult(c.Request.Context(), channel, req.BytedToken, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.GetVisualValidateResult(c.Request.Context(), userId, req.BytedToken)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -63,11 +47,8 @@ func CreateAsset(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.CreateAsset(c.Request.Context(), channel, req.GroupID, req.URL, req.AssetType, req.Name, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.CreateAsset(c.Request.Context(), userId, req.GroupID, req.URL, req.AssetType, req.Name)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -82,10 +63,7 @@ func ListAssets(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
+	userId := c.GetInt("id")
 	input := &service.ListAssetsInput{
 		GroupIDs:   req.GroupIDs,
 		GroupType:  req.GroupType,
@@ -96,7 +74,7 @@ func ListAssets(c *gin.Context) {
 		SortBy:     req.SortBy,
 		SortOrder:  req.SortOrder,
 	}
-	resp, err := service.ListAssets(c.Request.Context(), channel, input)
+	resp, err := service.ListAssets(c.Request.Context(), userId, input)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -111,11 +89,8 @@ func GetAsset(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.GetAsset(c.Request.Context(), channel, req.ID, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.GetAsset(c.Request.Context(), userId, req.ID)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -130,11 +105,8 @@ func UpdateAsset(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.UpdateAsset(c.Request.Context(), channel, req.ID, req.Name, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.UpdateAsset(c.Request.Context(), userId, req.ID, req.Name)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -149,11 +121,8 @@ func DeleteAsset(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.DeleteAsset(c.Request.Context(), channel, req.ID, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.DeleteAsset(c.Request.Context(), userId, req.ID)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -168,10 +137,7 @@ func ListAssetGroups(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
+	userId := c.GetInt("id")
 	input := &service.ListAssetGroupsInput{
 		Name:       req.Name,
 		GroupIDs:   req.GroupIDs,
@@ -179,7 +145,7 @@ func ListAssetGroups(c *gin.Context) {
 		PageNumber: req.PageNumber,
 		PageSize:   req.PageSize,
 	}
-	resp, err := service.ListAssetGroups(c.Request.Context(), channel, input)
+	resp, err := service.ListAssetGroups(c.Request.Context(), userId, input)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -194,11 +160,8 @@ func GetAssetGroup(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.GetAssetGroup(c.Request.Context(), channel, req.ID, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.GetAssetGroup(c.Request.Context(), userId, req.ID)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -213,11 +176,8 @@ func UpdateAssetGroup(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.UpdateAssetGroup(c.Request.Context(), channel, req.ID, req.Name, req.Title, req.Description, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.UpdateAssetGroup(c.Request.Context(), userId, req.ID, req.Name, req.Title, req.Description)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -232,11 +192,8 @@ func DeleteAssetGroup(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := getChannelForAsset(c, req.ChannelID)
-	if err != nil {
-		return
-	}
-	resp, err := service.DeleteAssetGroup(c.Request.Context(), channel, req.ID, req.ProjectName)
+	userId := c.GetInt("id")
+	resp, err := service.DeleteAssetGroup(c.Request.Context(), userId, req.ID)
 	if err != nil {
 		common.ApiError(c, err)
 		return
