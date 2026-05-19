@@ -1,18 +1,91 @@
 package service
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/volcengine/volcengine-go-sdk/volcengine"
+	"github.com/volcengine/volcengine-go-sdk/volcengine/credentials"
+	"github.com/volcengine/volcengine-go-sdk/volcengine/session"
+	"github.com/volcengine/volcengine-go-sdk/volcengine/universal"
 )
 
 const arkBaseURL = "https://ark.cn-beijing.volces.com"
 const arkAPIVersion = "2024-01-01"
+
+type dtoChannelSetting struct {
+	Proxy string `json:"proxy"`
+}
+
+// CallArkAPI 调用火山引擎 Ark API（使用官方 SDK）
+func CallArkAPI(ctx context.Context, channel *model.Channel, action string, reqBody map[string]any) (map[string]any, error) {
+	accessKey, secretKey, err := ParseVolcengineAssetAuth(channel.Key)
+	if err != nil {
+		return nil, fmt.Errorf("parse volcengine auth failed: %w", err)
+	}
+
+	config := volcengine.NewConfig().
+		WithCredentials(credentials.NewStaticCredentials(accessKey, secretKey, "")).
+		WithRegion("cn-beijing")
+
+	// 支持 HTTP 代理
+	if channel.Setting != nil {
+		var setting dtoChannelSetting
+		if err := common.UnmarshalJsonStr(*channel.Setting, &setting); err == nil && setting.Proxy != "" {
+			proxyURL, parseErr := url.Parse(setting.Proxy)
+			if parseErr == nil {
+				config.HTTPClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+			}
+		}
+	}
+
+	sess, err := session.NewSession(config)
+	if err != nil {
+		return nil, fmt.Errorf("create session failed: %w", err)
+	}
+
+	client := universal.New(sess)
+
+	resp, err := client.DoCall(
+		universal.RequestUniversal{
+			ServiceName: "ark",
+			Action:      action,
+			Version:     arkAPIVersion,
+			HttpMethod:  universal.POST,
+			ContentType: universal.ApplicationJSON,
+		},
+		&reqBody,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, errors.New("response is nil")
+	}
+
+	respBytes, _ := common.Marshal(resp)
+	var result map[string]any
+	_ = common.Unmarshal(respBytes, &result)
+	return result, nil
+}
+
+// ParseVolcengineAssetAuth 从 channel.Key 解析 AK/SK（格式: access_key|secret_key）
+func ParseVolcengineAssetAuth(key string) (accessKey, secretKey string, err error) {
+	if key == "" {
+		return "", "", errors.New("volcengine channel key is empty")
+	}
+	parts := strings.Split(key, "|")
+	if len(parts) != 2 {
+		return "", "", errors.New("invalid volcengine key format, expected: access_key|secret_key")
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
+}
 
 // resolveChannelForUser 获取平台默认 VolcEngine channel 和用户的 project name
 func resolveChannelForUser(userId int) (*model.Channel, string, error) {
@@ -39,74 +112,6 @@ func resolveChannelForUser(userId int) (*model.Channel, string, error) {
 		projectName = "default"
 	}
 	return channel, projectName, nil
-}
-
-type dtoChannelSetting struct {
-	Proxy string `json:"proxy"`
-}
-
-// CallArkAPI 调用火山引擎 Ark API
-func CallArkAPI(ctx context.Context, channel *model.Channel, action string, reqBody map[string]any) (map[string]any, error) {
-	accessKey, secretKey, err := ParseVolcengineAssetAuth(channel.Key)
-	if err != nil {
-		return nil, fmt.Errorf("parse volcengine auth failed: %w", err)
-	}
-
-	baseURL := arkBaseURL
-	if channel.BaseURL != nil && *channel.BaseURL != "" {
-		baseURL = *channel.BaseURL
-	}
-
-	reqURL := fmt.Sprintf("%s/?Action=%s&Version=%s", baseURL, action, arkAPIVersion)
-
-	jsonBody, err := common.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body failed: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("create request failed: %w", err)
-	}
-
-	if err := SignArkRequest(httpReq, accessKey, secretKey); err != nil {
-		return nil, fmt.Errorf("sign request failed: %w", err)
-	}
-
-	// 获取 HTTP 客户端（支持 channel 级别的 proxy）
-	proxyURL := ""
-	if channel.Setting != nil {
-		var setting dtoChannelSetting
-		if err := common.UnmarshalJsonStr(*channel.Setting, &setting); err == nil {
-			proxyURL = setting.Proxy
-		}
-	}
-	client, err := GetHttpClientWithProxy(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("get http client failed: %w", err)
-	}
-
-	httpResp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send request failed: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body failed: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream error: status=%d, body=%s", httpResp.StatusCode, string(respBody))
-	}
-
-	var result map[string]any
-	if err := common.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response failed: %w", err)
-	}
-
-	return result, nil
 }
 
 // CreateUserAssetMapping 在用户完成真人认证后创建映射
@@ -187,7 +192,6 @@ func GetVisualValidateResult(ctx context.Context, userId int, bytedToken string)
 	// 从响应结果中提取 GroupId，创建映射
 	if result, ok := resp["Result"].(map[string]any); ok {
 		if groupId, ok := result["GroupId"].(string); groupId != "" && ok {
-			// 检查是否已有映射
 			existing, _ := model.GetUserAssetGroupMapping(userId)
 			if existing == nil {
 				_, _ = CreateUserAssetMapping(userId, groupId, channel.Id, projectName)
