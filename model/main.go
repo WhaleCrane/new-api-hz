@@ -281,6 +281,7 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 			&AssetGroupMapping{},
+			&AIGCAssetGroupMapping{},
 			&PerfMetric{},
 	)
 	if err != nil {
@@ -331,6 +332,7 @@ func migrateDBFast() error {
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&AssetGroupMapping{}, "AssetGroupMapping"},
+		{&AIGCAssetGroupMapping{}, "AIGCAssetGroupMapping"},
 		{&PerfMetric{}, "PerfMetric"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
