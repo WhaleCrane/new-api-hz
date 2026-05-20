@@ -894,3 +894,96 @@ func RemoveGeminiDisabledFields(jsonData []byte) ([]byte, error) {
 	}
 	return jsonDataAfter, nil
 }
+
+// SeedanceContentItem mirrors the Seedance 2.0 official API content array item.
+type SeedanceContentItem struct {
+	Type      string            `json:"type,omitempty"`
+	Text      string            `json:"text,omitempty"`
+	ImageURL  *SeedanceMediaURL `json:"image_url,omitempty"`
+	VideoURL  *SeedanceMediaURL `json:"video_url,omitempty"`
+	AudioURL  *SeedanceMediaURL `json:"audio_url,omitempty"`
+	Role      string            `json:"role,omitempty"`
+	DraftTask *struct {
+		ID string `json:"id,omitempty"`
+	} `json:"draft_task,omitempty"`
+}
+
+// SeedanceMediaURL mirrors the official API image_url/video_url/audio_url object.
+type SeedanceMediaURL struct {
+	URL string `json:"url,omitempty"`
+}
+
+// SeedanceSubmitReq represents the Seedance 2.0 official API request format.
+// Used by the /s1/video/generations endpoint.
+type SeedanceSubmitReq struct {
+	Model                 string                `json:"model"`
+	Content               []SeedanceContentItem `json:"content,omitempty"`
+	CallbackURL           string                `json:"callback_url,omitempty"`
+	ReturnLastFrame       *dto.BoolValue        `json:"return_last_frame,omitempty"`
+	ServiceTier           string                `json:"service_tier,omitempty"`
+	ExecutionExpiresAfter *dto.IntValue         `json:"execution_expires_after,omitempty"`
+	GenerateAudio         *dto.BoolValue        `json:"generate_audio,omitempty"`
+	Draft                 *dto.BoolValue        `json:"draft,omitempty"`
+	Tools                 []struct {
+		Type string `json:"type,omitempty"`
+	} `json:"tools,omitempty"`
+	SafetyIdentifier string                 `json:"safety_identifier,omitempty"`
+	Resolution       string                 `json:"resolution,omitempty"`
+	Ratio            string                 `json:"ratio,omitempty"`
+	Duration         *dto.IntValue          `json:"duration,omitempty"`
+	Frames           *dto.IntValue          `json:"frames,omitempty"`
+	Seed             *dto.IntValue          `json:"seed,omitempty"`
+	CameraFixed      *dto.BoolValue         `json:"camera_fixed,omitempty"`
+	Watermark        *dto.BoolValue         `json:"watermark,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+}
+
+func (s *SeedanceSubmitReq) GetPrompt() string {
+	for _, item := range s.Content {
+		if item.Type == "text" {
+			return item.Text
+		}
+	}
+	return ""
+}
+
+func (s *SeedanceSubmitReq) HasVideo() bool {
+	for _, item := range s.Content {
+		if item.Type == "video_url" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SeedanceSubmitReq) UnmarshalJSON(data []byte) error {
+	type Alias SeedanceSubmitReq
+	aux := &struct {
+		Metadata json.RawMessage `json:"metadata,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	}
+
+	if err := common.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if len(aux.Metadata) > 0 {
+		var metadataStr string
+		if err := common.Unmarshal(aux.Metadata, &metadataStr); err == nil && metadataStr != "" {
+			var metadataObj map[string]interface{}
+			if err := common.Unmarshal([]byte(metadataStr), &metadataObj); err == nil {
+				s.Metadata = metadataObj
+				return nil
+			}
+		}
+
+		var metadataObj map[string]interface{}
+		if err := common.Unmarshal(aux.Metadata, &metadataObj); err == nil {
+			s.Metadata = metadataObj
+		}
+	}
+
+	return nil
+}

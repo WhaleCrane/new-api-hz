@@ -8,20 +8,12 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
-// from songquanpeng/one-api
-const (
-	USD2RMB = 7.3 // 暂定 1 USD = 7.3 RMB
-	USD     = 500 // $0.002 = 1 -> $1 = 500
-	RMB     = USD / USD2RMB
-)
-
 // modelRatio
 // https://platform.openai.com/docs/models/model-endpoint-compatibility
 // https://cloud.baidu.com/doc/WENXINWORKSHOP/s/Blfmc9dlf
 // https://openai.com/pricing
 // TODO: when a new api is enabled, check the pricing here
-// 1 === $0.002 / 1K tokens
-// 1 === ￥0.014 / 1k tokens
+// 1 === ¥0.002 / 1K tokens
 
 var defaultModelRatio = map[string]float64{
 	//"midjourney":                50,
@@ -155,22 +147,22 @@ var defaultModelRatio = map[string]float64{
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
 	"claude-opus-4-1-20250805":                  7.5,
-	"ERNIE-4.0-8K":                              0.120 * RMB,
-	"ERNIE-3.5-8K":                              0.012 * RMB,
-	"ERNIE-3.5-8K-0205":                         0.024 * RMB,
-	"ERNIE-3.5-8K-1222":                         0.012 * RMB,
-	"ERNIE-Bot-8K":                              0.024 * RMB,
-	"ERNIE-3.5-4K-0205":                         0.012 * RMB,
-	"ERNIE-Speed-8K":                            0.004 * RMB,
-	"ERNIE-Speed-128K":                          0.004 * RMB,
-	"ERNIE-Lite-8K-0922":                        0.008 * RMB,
-	"ERNIE-Lite-8K-0308":                        0.003 * RMB,
-	"ERNIE-Tiny-8K":                             0.001 * RMB,
-	"BLOOMZ-7B":                                 0.004 * RMB,
-	"Embedding-V1":                              0.002 * RMB,
-	"bge-large-zh":                              0.002 * RMB,
-	"bge-large-en":                              0.002 * RMB,
-	"tao-8k":                                    0.002 * RMB,
+	"ERNIE-4.0-8K":                              0.120 * 68.493,
+	"ERNIE-3.5-8K":                              0.012 * 68.493,
+	"ERNIE-3.5-8K-0205":                         0.024 * 68.493,
+	"ERNIE-3.5-8K-1222":                         0.012 * 68.493,
+	"ERNIE-Bot-8K":                              0.024 * 68.493,
+	"ERNIE-3.5-4K-0205":                         0.012 * 68.493,
+	"ERNIE-Speed-8K":                            0.004 * 68.493,
+	"ERNIE-Speed-128K":                          0.004 * 68.493,
+	"ERNIE-Lite-8K-0922":                        0.008 * 68.493,
+	"ERNIE-Lite-8K-0308":                        0.003 * 68.493,
+	"ERNIE-Tiny-8K":                             0.001 * 68.493,
+	"BLOOMZ-7B":                                 0.004 * 68.493,
+	"Embedding-V1":                              0.002 * 68.493,
+	"bge-large-zh":                              0.002 * 68.493,
+	"bge-large-en":                              0.002 * 68.493,
+	"tao-8k":                                    0.002 * 68.493,
 	"PaLM-2":                                    1,
 	"gemini-1.5-pro-latest":                     1.25, // $3.5 / 1M tokens
 	"gemini-1.5-flash-latest":                   0.075,
@@ -192,21 +184,21 @@ var defaultModelRatio = map[string]float64{
 	"gemini-robotics-er-1.5-preview":            0.15,
 	"gemini-embedding-001":                      0.075,
 	"text-embedding-004":                        0.001,
-	"chatglm_turbo":                             0.3572,     // ￥0.005 / 1k tokens
-	"chatglm_pro":                               0.7143,     // ￥0.01 / 1k tokens
-	"chatglm_std":                               0.3572,     // ￥0.005 / 1k tokens
-	"chatglm_lite":                              0.1429,     // ￥0.002 / 1k tokens
-	"glm-4":                                     7.143,      // ￥0.1 / 1k tokens
-	"glm-4v":                                    0.05 * RMB, // ￥0.05 / 1k tokens
-	"glm-4-alltools":                            0.1 * RMB,  // ￥0.1 / 1k tokens
+	"chatglm_turbo":                             0.3572, // ￥0.005 / 1k tokens
+	"chatglm_pro":                               0.7143, // ￥0.01 / 1k tokens
+	"chatglm_std":                               0.3572, // ￥0.005 / 1k tokens
+	"chatglm_lite":                              0.1429, // ￥0.002 / 1k tokens
+	"glm-4":                                     7.143,  // ￥0.1 / 1k tokens
+	"glm-4v":                                    0.05 * 68.493,
+	"glm-4-alltools":                            0.1 * 68.493,
 	"glm-3-turbo":                               0.3572,
-	"glm-4-plus":                                0.05 * RMB,
-	"glm-4-0520":                                0.1 * RMB,
-	"glm-4-air":                                 0.001 * RMB,
-	"glm-4-airx":                                0.01 * RMB,
-	"glm-4-long":                                0.001 * RMB,
+	"glm-4-plus":                                0.05 * 68.493,
+	"glm-4-0520":                                0.1 * 68.493,
+	"glm-4-air":                                 0.001 * 68.493,
+	"glm-4-airx":                                0.01 * 68.493,
+	"glm-4-long":                                0.001 * 68.493,
 	"glm-4-flash":                               0,
-	"glm-4v-plus":                               0.01 * RMB,
+	"glm-4v-plus":                               0.01 * 68.493,
 	"qwen-turbo":                                0.8572, // ￥0.012 / 1k tokens
 	"qwen-plus":                                 10,     // ￥0.14 / 1k tokens
 	"text-embedding-v1":                         0.05,   // ￥0.0007 / 1k tokens
@@ -229,15 +221,15 @@ var defaultModelRatio = map[string]float64{
 	"yi-34b-chat-0205":       0.18,
 	"yi-34b-chat-200k":       0.864,
 	"yi-vl-plus":             0.432,
-	"yi-large":               20.0 / 1000 * RMB,
-	"yi-medium":              2.5 / 1000 * RMB,
-	"yi-vision":              6.0 / 1000 * RMB,
-	"yi-medium-200k":         12.0 / 1000 * RMB,
-	"yi-spark":               1.0 / 1000 * RMB,
-	"yi-large-rag":           25.0 / 1000 * RMB,
-	"yi-large-turbo":         12.0 / 1000 * RMB,
-	"yi-large-preview":       20.0 / 1000 * RMB,
-	"yi-large-rag-preview":   25.0 / 1000 * RMB,
+	"yi-large":               20.0 / 1000 * 500,
+	"yi-medium":              2.5 / 1000 * 500,
+	"yi-vision":              6.0 / 1000 * 500,
+	"yi-medium-200k":         12.0 / 1000 * 500,
+	"yi-spark":               1.0 / 1000 * 500,
+	"yi-large-rag":           25.0 / 1000 * 500,
+	"yi-large-turbo":         12.0 / 1000 * 500,
+	"yi-large-preview":       20.0 / 1000 * 500,
+	"yi-large-rag-preview":   25.0 / 1000 * 500,
 	"command":                0.5,
 	"command-nightly":        0.5,
 	"command-light":          0.5,
@@ -250,10 +242,10 @@ var defaultModelRatio = map[string]float64{
 	"deepseek-coder":         0.27 / 2,
 	"deepseek-reasoner":      0.55 / 2, // 0.55 / 1k tokens
 	// Perplexity online 模型对搜索额外收费，有需要应自行调整，此处不计入搜索费用
-	"llama-3-sonar-small-32k-chat":   0.2 / 1000 * USD,
-	"llama-3-sonar-small-32k-online": 0.2 / 1000 * USD,
-	"llama-3-sonar-large-32k-chat":   1 / 1000 * USD,
-	"llama-3-sonar-large-32k-online": 1 / 1000 * USD,
+	"llama-3-sonar-small-32k-chat":   0.2 / 1000 * 500,
+	"llama-3-sonar-small-32k-online": 0.2 / 1000 * 500,
+	"llama-3-sonar-large-32k-chat":   1 / 1000 * 500,
+	"llama-3-sonar-large-32k-online": 1 / 1000 * 500,
 	// grok
 	"grok-3-beta":           1.5,
 	"grok-3-mini-beta":      0.15,

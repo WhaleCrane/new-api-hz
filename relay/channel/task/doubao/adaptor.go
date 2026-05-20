@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
@@ -115,6 +117,9 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+		return relaycommon.ValidateSeedanceTaskRequest(c, info)
+	}
 	// Accept only POST /v1/video/generations as "generate" action.
 	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
 }
@@ -132,19 +137,113 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	return nil
 }
 
-// EstimateBilling 检测请求 metadata 中是否包含视频输入，返回视频折扣 OtherRatio。
+// EstimateBilling 检测视频输入和分辨率，返回四档 OtherRatio。
+// 档位：low(480p/720p无视频)、high(1080p无视频)、low_video(480p/720p有视频)、high_video(1080p有视频)。
+// 基准档（low）不返回 OtherRatio，其余档返回 {"video_resolution_input": ratio}。
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+		return estimateSeedanceBilling(c, info)
+	}
+	// 标准格式路径：仅检测 metadata 中的 video_url（不含分辨率信息）
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil
 	}
 	if hasVideoInMetadata(req.Metadata) {
-		if ratio, ok := GetVideoInputRatio(info.OriginModelName); ok {
-			return map[string]float64{"video_input": ratio}
+		ratioMap, ok := GetResolutionVideoRatio(info.OriginModelName)
+		if !ok {
+			return nil
+		}
+		if ratio, ok := ratioMap["low_video"]; ok {
+			return map[string]float64{"video_resolution_input": ratio}
 		}
 	}
 	return nil
 }
+
+// estimateSeedanceBilling 处理 Seedance 2.0 官方格式的四档计费。
+func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := relaycommon.GetSeedanceTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+
+	ratioMap, ok := GetResolutionVideoRatio(info.OriginModelName)
+	if !ok {
+		return nil
+	}
+
+	hasVideo := req.HasVideo()
+	tier := resolveResolutionTier(req.Resolution)
+
+	key := tierKey(hasVideo, tier)
+	if key == "low" {
+		// 基准档（480p/720p 无视频），不应用额外倍率
+		return nil
+	}
+
+	if ratio, ok := ratioMap[key]; ok {
+		return map[string]float64{"video_resolution_input": ratio}
+	}
+	return nil
+}
+
+// resolutionTier 分辨率档位。
+type resolutionTier int
+
+const (
+	tierLow  resolutionTier = iota // 480p / 720p（默认）
+	tierHigh                       // 1080p
+)
+
+// resolveResolutionTier 根据 resolution 字段判断档位。
+func resolveResolutionTier(resolution string) resolutionTier {
+	r := strings.ToLower(strings.TrimSpace(resolution))
+	if r == "1080p" {
+		return tierHigh
+	}
+	return tierLow
+}
+
+// tierKey 组合 hasVideo 和 resolutionTier 生成比率映射 key。
+func tierKey(hasVideo bool, tier resolutionTier) string {
+	if hasVideo {
+		if tier == tierHigh {
+			return "high_video"
+		}
+		return "low_video"
+	}
+	if tier == tierHigh {
+		return "high"
+	}
+	return "low"
+}
+
+// [已弃用] EstimateBilling 旧版实现（仅检测 video_url 存在性，保留用于参考）。
+// func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+// 	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+// 		req, err := relaycommon.GetSeedanceTaskRequest(c)
+// 		if err != nil {
+// 			return nil
+// 		}
+// 		if req.HasVideo() {
+// 			if ratio, ok := GetVideoInputRatio(info.OriginModelName); ok {
+// 				return map[string]float64{"video_input": ratio}
+// 			}
+// 		}
+// 		return nil
+// 	}
+// 	req, err := relaycommon.GetTaskRequest(c)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	if hasVideoInMetadata(req.Metadata) {
+// 		if ratio, ok := GetVideoInputRatio(info.OriginModelName); ok {
+// 			return map[string]float64{"video_input": ratio}
+// 		}
+// 	}
+// 	return nil
+// }
 
 // hasVideoInMetadata 直接检查 metadata 的 content 数组是否包含 video_url 条目，
 // 避免构建完整的上游 requestPayload。
@@ -177,6 +276,34 @@ func hasVideoInMetadata(metadata map[string]interface{}) bool {
 
 // BuildRequestBody converts request into Doubao specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+		return a.buildSeedanceRequestBody(c, info)
+	}
+	return a.buildStandardRequestBody(c, info)
+}
+
+// buildSeedanceRequestBody passes the Seedance 2.0 official format directly to upstream without conversion.
+func (a *TaskAdaptor) buildSeedanceRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	req, err := relaycommon.GetSeedanceTaskRequest(c)
+	if err != nil {
+		return nil, err
+	}
+
+	if info.IsModelMapped {
+		req.Model = info.UpstreamModelName
+	} else {
+		info.UpstreamModelName = req.Model
+	}
+
+	data, err := common.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(data), nil
+}
+
+// buildStandardRequestBody converts TaskSubmitReq into the Doubao requestPayload format.
+func (a *TaskAdaptor) buildStandardRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil, err

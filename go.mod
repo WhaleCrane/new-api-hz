@@ -46,6 +46,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/tiktoken-go/tokenizer v0.6.2
+	github.com/volcengine/volcengine-go-sdk v1.2.28
 	github.com/waffo-com/waffo-go v1.3.1
 	github.com/yapingcat/gomedia v0.0.0-20240906162731-17feea57090c
 	golang.org/x/crypto v0.45.0
@@ -58,6 +59,12 @@ require (
 	gorm.io/driver/mysql v1.4.3
 	gorm.io/driver/postgres v1.5.2
 	gorm.io/gorm v1.25.2
+)
+
+require (
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 require (
