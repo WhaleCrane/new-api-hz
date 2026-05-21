@@ -2,7 +2,7 @@ name: Publish Docker image (nightly)
 
 on:
   push:
-    branches:
+    tags:
       - 'nightly*'
   workflow_dispatch:
     inputs:
