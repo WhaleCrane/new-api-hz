@@ -117,7 +117,7 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
-	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit || isSeedance2Model(info.OriginModelName) {
 		return relaycommon.ValidateSeedanceTaskRequest(c, info)
 	}
 	// Accept only POST /v1/video/generations as "generate" action.
@@ -137,11 +137,15 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	return nil
 }
 
-// EstimateBilling 检测视频输入和分辨率，返回四档 OtherRatio。
-// 档位：low(480p/720p无视频)、high(1080p无视频)、low_video(480p/720p有视频)、high_video(1080p有视频)。
-// 基准档（low）不返回 OtherRatio，其余档返回 {"video_resolution_input": ratio}。
+// isSeedance2Model 判断是否为 doubao-seedance-2 系列模型。
+func isSeedance2Model(modelName string) bool {
+	return strings.HasPrefix(modelName, "doubao-seedance-2")
+}
+
+// EstimateBilling 检测视频输入和分辨率，返回预扣倍率。
+// Seedance 2 系列模型走 token 预估计费，其余 doubao 视频走四档分辨率倍率。
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
-	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit || isSeedance2Model(info.OriginModelName) {
 		return estimateSeedanceBilling(c, info)
 	}
 	// 标准格式路径：仅检测 metadata 中的 video_url（不含分辨率信息）
@@ -161,31 +165,115 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return nil
 }
 
-// estimateSeedanceBilling 处理 Seedance 2.0 官方格式的四档计费。
+// seedanceTokenRatioKey 是 estimateSeedanceBilling 返回的 ratio key。
+const seedanceTokenRatioKey = "seedance_token_ratio"
+
+// estimateSeedanceBilling 根据请求参数预估 token 量，返回 token 倍率 × 分档倍率。
+//
+// 预扣逻辑：
+//   - 需在管理后台设 modelPrice = 模型每百万 token 的单价（如 46）
+//   - ModelPriceHelperPerCall 算出 baseQuota = modelPrice × QuotaPerUnit × groupRatio
+//   - 本函数返回 ratio = (estTokens / 1_000_000) × tierRatio
+//   - 最终预扣额 = baseQuota × ratio
+//
+// 预估 token 公式：(width × height × fps × duration) / 1024 × count
+// 分档倍率从 resolutionVideoRatioMap 取值，相对基准价格（480p/720p 无视频）的比率。
 func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetSeedanceTaskRequest(c)
 	if err != nil {
 		return nil
 	}
 
-	ratioMap, ok := GetResolutionVideoRatio(info.OriginModelName)
-	if !ok {
+	// ---- 1) 计算预估 token ----
+	resolution := req.Resolution
+	if resolution == "" {
+		resolution = "720p"
+	}
+	aspectRatio := req.Ratio
+	if aspectRatio == "" {
+		aspectRatio = "16:9"
+	}
+	duration := 4
+	if req.Duration != nil && int(*req.Duration) > 0 {
+		duration = int(*req.Duration)
+	}
+	fps := 24
+	if req.Frames != nil && int(*req.Frames) > 0 {
+		fps = int(*req.Frames)
+	}
+
+	width, height := resolveSeedanceDimensions(resolution, aspectRatio)
+	estTokens := (width * height * fps * duration) / 1024 // count = 1
+
+	// ---- 2) 分档倍率 ----
+	tierRatio := 1.0
+	if ratioMap, ok := GetResolutionVideoRatio(info.OriginModelName); ok {
+		hasVideo := req.HasVideo()
+		tier := resolveResolutionTier(resolution)
+		key := tierKey(hasVideo, tier)
+		if key != "low" {
+			if r, ok := ratioMap[key]; ok {
+				tierRatio = r
+			}
+		}
+	}
+
+	// ---- 3) 组合倍率 ----
+	// baseQuota = modelPrice × QuotaPerUnit × groupRatio
+	// finalQuota = baseQuota × (estTokens / 1_000_000) × tierRatio
+	combined := float64(estTokens) / 1_000_000.0 * tierRatio
+	if combined == 0 {
 		return nil
 	}
+	return map[string]float64{seedanceTokenRatioKey: combined}
+}
 
-	hasVideo := req.HasVideo()
-	tier := resolveResolutionTier(req.Resolution)
+// -- Seedance 分辨率 / 比例 精确映射 --
 
-	key := tierKey(hasVideo, tier)
-	if key == "low" {
-		// 基准档（480p/720p 无视频），不应用额外倍率
-		return nil
+// seedanceDimensions 表：Seedance 官方精确分辨率映射。
+// 注意 3:4 和 9:16 分别是 4:3 和 16:9 的竖屏版本（宽高互换）。
+var seedanceDimensions = map[string]map[string][2]int{
+	"480p": {
+		"21:9": {992, 432},
+		"16:9": {864, 496},
+		"4:3":  {752, 560},
+		"1:1":  {640, 640},
+		"3:4":  {560, 752},
+		"9:16": {496, 864},
+	},
+	"720p": {
+		"21:9": {1470, 630},
+		"16:9": {1280, 720},
+		"4:3":  {1112, 834},
+		"1:1":  {960, 960},
+		"3:4":  {834, 1112},
+		"9:16": {720, 1280},
+	},
+	"1080p": {
+		"21:9": {2206, 946},
+		"16:9": {1920, 1080},
+		"4:3":  {1664, 1248},
+		"1:1":  {1440, 1440},
+		"3:4":  {1248, 1664},
+		"9:16": {1080, 1920},
+	},
+}
+
+// resolveSeedanceDimensions 根据 resolution 和 aspectRatio 查表获取确切宽高。
+// 不存在的组合返回 720p 16:9 默认值。
+func resolveSeedanceDimensions(resolution, aspectRatio string) (width, height int) {
+	res := strings.ToLower(strings.TrimSpace(resolution))
+	ratio := aspectRatio
+	if ratio == "" {
+		ratio = "16:9"
 	}
-
-	if ratio, ok := ratioMap[key]; ok {
-		return map[string]float64{"video_resolution_input": ratio}
+	if resMap, ok := seedanceDimensions[res]; ok {
+		if dim, ok := resMap[ratio]; ok {
+			return dim[0], dim[1]
+		}
 	}
-	return nil
+	// fallback 默认 720p 16:9
+	return 1280, 720
 }
 
 // resolutionTier 分辨率档位。
@@ -276,7 +364,7 @@ func hasVideoInMetadata(metadata map[string]interface{}) bool {
 
 // BuildRequestBody converts request into Doubao specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
-	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit || isSeedance2Model(info.OriginModelName) {
 		return a.buildSeedanceRequestBody(c, info)
 	}
 	return a.buildStandardRequestBody(c, info)
