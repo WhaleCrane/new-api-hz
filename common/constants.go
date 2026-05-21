@@ -59,7 +59,7 @@ func ThemeAwarePath(suffix string) string {
 
 // var ChatLink = ""
 // var ChatLink2 = ""
-var QuotaPerUnit = 500 * 1000.0 // $0.002 / 1K tokens
+var QuotaPerUnit = 500 * 1000.0 // ¥0.002 / 1K tokens
 // 保留旧变量以兼容历史逻辑，实际展示由 general_setting.quota_display_type 控制
 var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
@@ -144,7 +144,7 @@ var TelegramBotName = ""
 var QuotaForNewUser = 0
 var QuotaForInviter = 0
 var QuotaForInvitee = 0
-var ChannelDisableThreshold = 5.0
+var ChannelDisableThreshold = 5.0 // ¥5 / 1K tokens 阈值，超过此值自动禁用渠道
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000

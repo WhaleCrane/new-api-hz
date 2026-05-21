@@ -280,7 +280,9 @@ func migrateDB() error {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
-		&PerfMetric{},
+			&AssetGroupMapping{},
+			&AIGCAssetGroupMapping{},
+			&PerfMetric{},
 	)
 	if err != nil {
 		return err
@@ -329,6 +331,8 @@ func migrateDBFast() error {
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
+		{&AssetGroupMapping{}, "AssetGroupMapping"},
+		{&AIGCAssetGroupMapping{}, "AIGCAssetGroupMapping"},
 		{&PerfMetric{}, "PerfMetric"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
@@ -391,7 +395,7 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`title`" + ` varchar(128) NOT NULL,
 ` + "`subtitle`" + ` varchar(255) DEFAULT '',
 ` + "`price_amount`" + ` decimal(10,6) NOT NULL,
-` + "`currency`" + ` varchar(8) NOT NULL DEFAULT 'USD',
+` + "`currency`" + ` varchar(8) NOT NULL DEFAULT 'CNY',
 ` + "`duration_unit`" + ` varchar(16) NOT NULL DEFAULT 'month',
 ` + "`duration_value`" + ` integer NOT NULL DEFAULT 1,
 ` + "`custom_seconds`" + ` bigint NOT NULL DEFAULT 0,
@@ -424,7 +428,7 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "title", DDL: "`title` varchar(128) NOT NULL"},
 		{Name: "subtitle", DDL: "`subtitle` varchar(255) DEFAULT ''"},
 		{Name: "price_amount", DDL: "`price_amount` decimal(10,6) NOT NULL"},
-		{Name: "currency", DDL: "`currency` varchar(8) NOT NULL DEFAULT 'USD'"},
+		{Name: "currency", DDL: "`currency` varchar(8) NOT NULL DEFAULT 'CNY'"},
 		{Name: "duration_unit", DDL: "`duration_unit` varchar(16) NOT NULL DEFAULT 'month'"},
 		{Name: "duration_value", DDL: "`duration_value` integer NOT NULL DEFAULT 1"},
 		{Name: "custom_seconds", DDL: "`custom_seconds` bigint NOT NULL DEFAULT 0"},

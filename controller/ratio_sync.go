@@ -774,7 +774,7 @@ func convertOpenRouterToRatioData(reader io.Reader) (map[string]any, error) {
 		}
 
 		// Normal case: promptPrice > 0
-		ratio := promptPrice * 1000 * ratio_setting.USD
+		ratio := promptPrice * common.QuotaPerUnit
 		ratio = roundRatioValue(ratio)
 		modelRatioMap[m.ID] = ratio
 
@@ -957,7 +957,7 @@ func convertModelsDevToRatioData(reader io.Reader) (map[string]any, error) {
 			continue
 		}
 
-		modelRatio := candidate.Input * float64(ratio_setting.USD) / modelsDevInputCostRatioBase
+		modelRatio := candidate.Input * (common.QuotaPerUnit / 1000) / modelsDevInputCostRatioBase
 		modelRatioMap[modelName] = roundRatioValue(modelRatio)
 
 		if candidate.Output != nil {

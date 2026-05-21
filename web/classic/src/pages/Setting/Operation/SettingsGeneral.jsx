@@ -47,12 +47,11 @@ export default function GeneralSettings(props) {
   const [inputs, setInputs] = useState({
     TopUpLink: '',
     'general_setting.docs_link': '',
-    'general_setting.quota_display_type': 'USD',
+    'general_setting.quota_display_type': 'CNY',
     'general_setting.custom_currency_symbol': '¤',
     'general_setting.custom_currency_exchange_rate': '',
     QuotaPerUnit: '',
     RetryTimes: '',
-    USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
     DemoSiteEnabled: false,
@@ -103,11 +102,11 @@ export default function GeneralSettings(props) {
       });
   }
 
-  // 计算展示在输入框中的“1 USD = X <currency>”中的 X
+  // 计算展示在输入框中的”1 CNY = X <currency>”中的 X
   const combinedRate = useMemo(() => {
     const type = inputs['general_setting.quota_display_type'];
+    if (type === 'CNY') return '1';
     if (type === 'USD') return '1';
-    if (type === 'CNY') return String(inputs['USDExchangeRate'] || '');
     if (type === 'TOKENS') return String(inputs['QuotaPerUnit'] || '');
     if (type === 'CUSTOM')
       return String(
@@ -118,9 +117,7 @@ export default function GeneralSettings(props) {
 
   const onCombinedRateChange = (val) => {
     const type = inputs['general_setting.quota_display_type'];
-    if (type === 'CNY') {
-      handleFieldChange('USDExchangeRate')(val);
-    } else if (type === 'TOKENS') {
+    if (type === 'TOKENS') {
       handleFieldChange('QuotaPerUnit')(val);
     } else if (type === 'CUSTOM') {
       handleFieldChange('general_setting.custom_currency_exchange_rate')(val);
@@ -146,7 +143,7 @@ export default function GeneralSettings(props) {
   const quotaDisplayTypeDesc = useMemo(() => {
     const descMap = {
       USD: t('站点所有额度将以美元 ($) 显示'),
-      CNY: t('站点所有额度将按汇率换算为人民币 (¥) 显示'),
+      CNY: t('站点所有额度将以人民币 (¥) 显示'),
       TOKENS: t('站点所有额度将以原始 Token 数显示，不做货币换算'),
       CUSTOM: t('站点所有额度将按汇率换算为自定义货币显示'),
     };
