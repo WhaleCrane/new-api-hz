@@ -165,15 +165,16 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return nil
 }
 
-// estimateSeedanceBilling 预扣费：直接按 token 公式计算最终额度。
+// estimateSeedanceBilling 预扣费，公式与结算一致：
 //
-// 公式：estTokens / 1_000_000 × pricePerMToken × QuotaPerUnit × groupRatio × tierRatio
+//	quota = tokens / 1_000_000 × pricePerMToken × QuotaPerUnit × groupRatio × tierRatio
 //
-// pricePerMToken 优先取 ModelPrice（¥/百万token），
-// 未配置时 fallback 到 ModelRatio × 2（ratio 1 = ¥2/百万token）。
+// pricePerMToken 优先取 ModelPrice（¥/百万token），未配置 fallback 到 ModelRatio × 2。
+// tierRatio 来自 resolutionVideoRatioMap 的四级系数（如 low_video=28/46）。
 //
-// 分档倍率从 resolutionVideoRatioMap 取值（无视频/有视频 × 分辨率）。
-// 返回 nil 跳过 OtherRatios 步骤，直接使用本函数设定的 Quota。
+// 返回 _st_tier 作为 OtherRatio：
+//   - step 6 将其乘到 Quota，得到最终预扣额
+//   - 存入 BillingContext.OtherRatios，结算时 AdjustBillingOnComplete 读取
 func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetSeedanceTaskRequest(c)
 	if err != nil {
@@ -199,7 +200,7 @@ func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[st
 	}
 
 	width, height := resolveSeedanceDimensions(resolution, aspectRatio)
-	estTokens := (width * height * fps * duration) / 1024 // count = 1
+	estTokens := (width * height * fps * duration) / 1024
 
 	// ---- 2) 分档倍率 ----
 	tierRatio := 1.0
@@ -214,18 +215,18 @@ func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[st
 		}
 	}
 
-	// ---- 3) 直接计算最终预扣额 ----
-	// pricePerMToken: 优先取 ModelPrice（¥/百万token），未配置则 fallback 到 ModelRatio × 2
+	// ---- 3) 价格系数 ----
 	pricePerMToken := info.PriceData.ModelPrice
 	if pricePerMToken <= 0 {
 		pricePerMToken = info.PriceData.ModelRatio * 2
 	}
-	quota := int(float64(estTokens) / 1_000_000.0 * pricePerMToken * common.QuotaPerUnit *
-		info.PriceData.GroupRatioInfo.GroupRatio * tierRatio)
-	if quota > 0 {
-		info.PriceData.Quota = quota
-	}
-	return nil // 跳过 relay_task.go 步骤 6 的 OtherRatios 乘法
+
+	// ---- 4) 设 baseline（不含 tierRatio），step 6 乘上 tierRatio 得最终预扣 ----
+	baseline := float64(estTokens) / 1_000_000.0 * pricePerMToken * common.QuotaPerUnit *
+		info.PriceData.GroupRatioInfo.GroupRatio
+	info.PriceData.Quota = int(baseline)
+
+	return map[string]float64{"_st_tier": tierRatio}
 }
 
 // -- Seedance 分辨率 / 比例 精确映射 --
@@ -556,9 +557,8 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	return &taskResult, nil
 }
 
-// AdjustBillingOnComplete 根据上游总 token 数进行准确结算。
-// Seedance 2 系列用 totalTokens × modelRatio × groupRatio，
-// 不重复乘 otherMultiplier（避免 RecalculateTaskQuotaByTokens 中的 double-count）。
+// AdjustBillingOnComplete 根据上游实际 total_tokens 多退少补。
+// 公式与预扣一致：total_tokens × modelRatio × groupRatio × tierRatio
 func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
 	if taskResult.TotalTokens <= 0 {
 		return 0
@@ -567,7 +567,13 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 	if bc == nil || !isSeedance2Model(bc.OriginModelName) {
 		return 0
 	}
-	quota := int(float64(taskResult.TotalTokens) * bc.ModelRatio * bc.GroupRatio)
+	tierRatio := 1.0
+	if bc.OtherRatios != nil {
+		if tr, ok := bc.OtherRatios["_st_tier"]; ok && tr > 0 {
+			tierRatio = tr
+		}
+	}
+	quota := int(float64(taskResult.TotalTokens) * bc.ModelRatio * bc.GroupRatio * tierRatio)
 	if quota <= 0 {
 		return 0
 	}
