@@ -220,6 +220,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 								if err := model.IncreaseUserQuota(task.UserId, refundQuota, false); err != nil {
 									logger.LogError(ctx, fmt.Sprintf("退还预扣费失败: %s", err.Error()))
 								} else {
+									model.DeltaUserUsedQuota(task.UserId, quotaDelta)
+									model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 									task.Quota = actualQuota // 更新任务记录的实际扣费额度
 
 									// 记录退款日志
@@ -271,6 +273,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 		if err := model.IncreaseUserQuota(task.UserId, quota, false); err != nil {
 			logger.LogWarn(ctx, "Failed to increase user quota: "+err.Error())
 		}
+		model.DeltaUserUsedQuota(task.UserId, -quota)
+		model.UpdateChannelUsedQuota(task.ChannelId, -quota)
 		logContent := fmt.Sprintf("Video async task failed %s, refund %s", task.TaskID, logger.LogQuota(quota))
 		model.RecordLog(task.UserId, model.LogTypeSystem, logContent)
 	}

@@ -998,6 +998,16 @@ func updateUserUsedQuota(id int, quota int) {
 	}
 }
 
+// DeltaUserUsedQuota adjusts used_quota by delta (supports negative values for refunds).
+// Unlike UpdateUserUsedQuotaAndRequestCount, this does not modify request_count.
+func DeltaUserUsedQuota(id int, delta int) {
+	if common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUsedQuota, id, delta)
+		return
+	}
+	updateUserUsedQuota(id, delta)
+}
+
 func updateUserRequestCount(id int, count int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Update("request_count", gorm.Expr("request_count + ?", count)).Error
 	if err != nil {

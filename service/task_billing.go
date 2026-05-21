@@ -221,11 +221,13 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if quotaDelta > 0 {
 		logType = model.LogTypeConsume
 		logQuota = quotaDelta
-		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
+		model.DeltaUserUsedQuota(task.UserId, quotaDelta)
 		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 	} else {
 		logType = model.LogTypeRefund
 		logQuota = -quotaDelta
+		model.DeltaUserUsedQuota(task.UserId, quotaDelta)
+		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 	}
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
