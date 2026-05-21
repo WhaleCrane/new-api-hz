@@ -2,7 +2,7 @@ name: Publish Docker image (stable)
 
 on:
   push:
-    branches:
+    tags:
       - 'stable*'
   workflow_dispatch:
     inputs:
@@ -28,12 +28,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Extract version from branch name
+      - name: Extract version from tag name
         id: version
         run: |
-          BRANCH="${GITHUB_REF#refs/heads/}"
-          VERSION="${BRANCH#stable-}"
-          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#stable-}"
+          echo "TAG=$TAG" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "value=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
