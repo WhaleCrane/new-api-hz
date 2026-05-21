@@ -76,12 +76,12 @@ func CreateAIGCAssetGroup(ctx context.Context, userId int, name, description, pr
 
 // CreateAIGCAssetMapping 在用户创建素材组后创建映射
 func CreateAIGCAssetMapping(userId int, groupId string, channelId int, projectName string) (*model.AIGCAssetGroupMapping, error) {
-	existing, err := model.GetUserAIGCAssetGroupMapping(userId)
+	existing, err := model.GetAIGCAssetGroupMapping(userId, groupId)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return existing, nil // 已存在，直接返回
+		return existing, nil // 该 group_id 已存在，直接返回
 	}
 
 	mapping := &model.AIGCAssetGroupMapping{
@@ -98,6 +98,27 @@ func CreateAIGCAssetMapping(userId int, groupId string, channelId int, projectNa
 
 // CreateAIGCAsset 创建素材
 func CreateAIGCAsset(ctx context.Context, userId int, groupID, assetURL, assetType, name string) (map[string]any, error) {
+	// 校验用户是否已创建素材组
+	userGroupIDs, err := model.GetUserAIGCGroupIDs(userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query user AIGC groups: %w", err)
+	}
+	if len(userGroupIDs) == 0 {
+		return nil, fmt.Errorf("user must create an AIGC asset group before creating assets")
+	}
+
+	// 校验 group_id 是否属于当前用户
+	found := false
+	for _, gid := range userGroupIDs {
+		if gid == groupID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("group_id does not belong to current user")
+	}
+
 	channel, projectName, err := resolveAIGCChannelForUser(userId)
 	if err != nil {
 		return nil, err
@@ -328,7 +349,9 @@ func DeleteAIGCAssetGroup(ctx context.Context, userId int, id string) (map[strin
 	}
 
 	// 删除成功后，清理本地映射
-	_ = model.DeleteAIGCAssetGroupMapping(userId, id)
+	if err := model.DeleteAIGCAssetGroupMapping(userId, id); err != nil {
+		return nil, fmt.Errorf("failed to delete asset group mapping: %w", err)
+	}
 
 	return resp, nil
 }

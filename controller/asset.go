@@ -59,7 +59,7 @@ func CreateAsset(c *gin.Context) {
 // ListAssets 查询素材资产列表
 func ListAssets(c *gin.Context) {
 	var req dto.ListAssetsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := common.ShouldBindJSONOptional(c, &req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -133,7 +133,7 @@ func DeleteAsset(c *gin.Context) {
 // ListAssetGroups 查询素材资产组列表
 func ListAssetGroups(c *gin.Context) {
 	var req dto.ListAssetGroupsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := common.ShouldBindJSONOptional(c, &req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -144,6 +144,8 @@ func ListAssetGroups(c *gin.Context) {
 		GroupType:  req.GroupType,
 		PageNumber: req.PageNumber,
 		PageSize:   req.PageSize,
+		SortBy:     req.SortBy,
+		SortOrder:  req.SortOrder,
 	}
 	resp, err := service.ListAssetGroups(c.Request.Context(), userId, input)
 	if err != nil {
@@ -177,7 +179,7 @@ func UpdateAssetGroup(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
-	resp, err := service.UpdateAssetGroup(c.Request.Context(), userId, req.ID, req.Name, req.Title, req.Description)
+	resp, err := service.UpdateAssetGroup(c.Request.Context(), userId, req.ID, req.Name, req.Description)
 	if err != nil {
 		common.ApiError(c, err)
 		return

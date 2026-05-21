@@ -41,6 +41,19 @@ func GetUserAIGCAssetGroupMapping(userId int) (*AIGCAssetGroupMapping, error) {
 	return mapping, nil
 }
 
+// GetAIGCAssetGroupMapping 按 user_id + group_id 查询映射（用于判重）
+func GetAIGCAssetGroupMapping(userId int, groupId string) (*AIGCAssetGroupMapping, error) {
+	mapping := &AIGCAssetGroupMapping{}
+	err := DB.Where("user_id = ? AND group_id = ?", userId, groupId).First(mapping).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return mapping, nil
+}
+
 // GetUserAIGCGroupIDs 获取用户拥有的所有 AIGC Group IDs（用于查询过滤）
 func GetUserAIGCGroupIDs(userId int) ([]string, error) {
 	var groupIDs []string

@@ -78,6 +78,8 @@ type ListAssetGroupsReq struct {
 	GroupType  string   `json:"group_type,omitempty"` // LivenessFace
 	PageNumber int      `json:"page_number,omitempty"`
 	PageSize   int      `json:"page_size,omitempty"`
+	SortBy     string   `json:"sort_by,omitempty"`
+	SortOrder  string   `json:"sort_order,omitempty"`
 }
 
 type AssetGroupDTO struct {
@@ -105,7 +107,6 @@ type GetAssetGroupReq struct {
 type UpdateAssetGroupReq struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
-	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 

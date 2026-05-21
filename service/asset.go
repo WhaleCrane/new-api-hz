@@ -116,12 +116,12 @@ func resolveChannelForUser(userId int) (*model.Channel, string, error) {
 
 // CreateUserAssetMapping 在用户完成真人认证后创建映射
 func CreateUserAssetMapping(userId int, groupId string, channelId int, projectName string) (*model.AssetGroupMapping, error) {
-	existing, err := model.GetUserAssetGroupMapping(userId)
+	existing, err := model.GetAssetGroupMapping(userId, groupId)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return existing, nil // 已存在，直接返回
+		return existing, nil // 该 group_id 已存在，直接返回
 	}
 
 	mapping := &model.AssetGroupMapping{
@@ -253,6 +253,9 @@ func ListAssets(ctx context.Context, userId int, req *ListAssetsInput) (map[stri
 	filter := reqBody["Filter"].(map[string]any)
 	if req.GroupType != "" {
 		filter["GroupType"] = req.GroupType
+	} else {
+		// s1 路径默认为 LivenessFace
+		filter["GroupType"] = "LivenessFace"
 	}
 	if len(req.Statuses) > 0 {
 		filter["Statuses"] = req.Statuses
@@ -335,6 +338,8 @@ type ListAssetGroupsInput struct {
 	GroupType  string
 	PageNumber int
 	PageSize   int
+	SortBy     string
+	SortOrder  string
 }
 
 // ListAssetGroups 查询素材组列表（自动按用户隔离）
@@ -356,11 +361,14 @@ func ListAssetGroups(ctx context.Context, userId int, req *ListAssetGroupsInput)
 		},
 	}
 	filter := reqBody["Filter"].(map[string]any)
-	if req.Name != "" {
-		filter["Name"] = req.Name
-	}
 	if req.GroupType != "" {
 		filter["GroupType"] = req.GroupType
+	} else {
+		// s1 路径默认为 LivenessFace
+		filter["GroupType"] = "LivenessFace"
+	}
+	if req.Name != "" {
+		filter["Name"] = req.Name
 	}
 	if projectName != "" {
 		filter["ProjectName"] = projectName
@@ -370,6 +378,12 @@ func ListAssetGroups(ctx context.Context, userId int, req *ListAssetGroupsInput)
 	}
 	if req.PageSize > 0 {
 		reqBody["PageSize"] = req.PageSize
+	}
+	if req.SortBy != "" {
+		reqBody["SortBy"] = req.SortBy
+	}
+	if req.SortOrder != "" {
+		reqBody["SortOrder"] = req.SortOrder
 	}
 	return CallArkAPI(ctx, channel, "ListAssetGroups", reqBody)
 }
@@ -391,7 +405,7 @@ func GetAssetGroup(ctx context.Context, userId int, id string) (map[string]any, 
 }
 
 // UpdateAssetGroup 更新素材组
-func UpdateAssetGroup(ctx context.Context, userId int, id, name, title, description string) (map[string]any, error) {
+func UpdateAssetGroup(ctx context.Context, userId int, id, name, description string) (map[string]any, error) {
 	channel, projectName, err := resolveChannelForUser(userId)
 	if err != nil {
 		return nil, err
@@ -402,9 +416,6 @@ func UpdateAssetGroup(ctx context.Context, userId int, id, name, title, descript
 	}
 	if name != "" {
 		reqBody["Name"] = name
-	}
-	if title != "" {
-		reqBody["Title"] = title
 	}
 	if description != "" {
 		reqBody["Description"] = description
@@ -428,5 +439,15 @@ func DeleteAssetGroup(ctx context.Context, userId int, id string) (map[string]an
 	if projectName != "" {
 		reqBody["ProjectName"] = projectName
 	}
-	return CallArkAPI(ctx, channel, "DeleteAssetGroup", reqBody)
+	resp, err := CallArkAPI(ctx, channel, "DeleteAssetGroup", reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	// 删除成功后，清理本地映射
+	if err := model.DeleteAssetGroupMapping(userId, id); err != nil {
+		return nil, fmt.Errorf("failed to delete asset group mapping: %w", err)
+	}
+
+	return resp, nil
 }

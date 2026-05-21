@@ -220,6 +220,31 @@ func ApiSuccessI18n(c *gin.Context, key string, data any, args ...map[string]any
 	})
 }
 
+// ShouldBindJSONOptional binds JSON from request body if present.
+// Returns nil if body is empty or {} — all fields are optional.
+func ShouldBindJSONOptional(c *gin.Context, v any) error {
+	if c.Request.ContentLength == 0 {
+		return nil
+	}
+	storage, err := GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || string(trimmed) == "{}" {
+		return nil
+	}
+	_, err = storage.Seek(0, io.SeekStart)
+	if err != nil {
+		return err
+	}
+	return UnmarshalBodyReusable(c, v)
+}
+
 // TranslateMessage is a helper function that calls i18n.T
 // This function is defined here to avoid circular imports
 // The actual implementation will be set during init
