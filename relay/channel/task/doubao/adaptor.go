@@ -165,16 +165,14 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return nil
 }
 
-// estimateSeedanceBilling 预扣费，公式与结算一致：
+// estimateSeedanceBilling 预扣费，直接使用官方分档价格（¥/百万tokens）：
 //
-//	quota = tokens / 1_000_000 × pricePerMToken × QuotaPerUnit × groupRatio × tierRatio
+//	quota = tokens / 1,000,000 × tierPrice × QuotaPerUnit × groupRatio
 //
-// pricePerMToken 优先取 ModelPrice（¥/百万token），未配置 fallback 到 ModelRatio × 2。
-// tierRatio 来自 resolutionVideoRatioMap 的四级系数（如 low_video=28/46）。
+// tierPrice 来自 seedanceTierPriceMap（如 480p/720p 无视频 = 46 元/百万tokens）。
+// 覆盖 info.PriceData.ModelPrice 为 tierPrice，供 BillingContext 记录并在结算时使用。
 //
-// 返回 _st_tier 作为 OtherRatio：
-//   - step 6 将其乘到 Quota，得到最终预扣额
-//   - 存入 BillingContext.OtherRatios，结算时 AdjustBillingOnComplete 读取
+// 不再返回 OtherRatios，不经过 step 6 乘算，直接设置 info.PriceData.Quota。
 func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetSeedanceTaskRequest(c)
 	if err != nil {
@@ -201,32 +199,44 @@ func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[st
 
 	width, height := resolveSeedanceDimensions(resolution, aspectRatio)
 	estTokens := (width * height * fps * duration) / 1024
+	if estTokens <= 0 {
+		return nil
+	}
 
-	// ---- 2) 分档倍率 ----
-	tierRatio := 1.0
-	if ratioMap, ok := GetResolutionVideoRatio(info.OriginModelName); ok {
-		hasVideo := req.HasVideo()
-		tier := resolveResolutionTier(resolution)
-		key := tierKey(hasVideo, tier)
-		if key != "low" {
-			if r, ok := ratioMap[key]; ok {
-				tierRatio = r
-			}
+	// ---- 2) 直接获取分档价格（¥/百万tokens） ----
+	hasVideo := req.HasVideo()
+	tier := resolveResolutionTier(resolution)
+	key := tierKey(hasVideo, tier)
+
+	tierPrice := 0.0
+	if priceMap, ok := GetSeedanceTierPrice(info.OriginModelName); ok {
+		if p, ok := priceMap[key]; ok {
+			tierPrice = p
 		}
 	}
-
-	// ---- 3) 价格系数 ----
-	pricePerMToken := info.PriceData.ModelPrice
-	if pricePerMToken <= 0 {
-		pricePerMToken = info.PriceData.ModelRatio * 2
+	if tierPrice <= 0 {
+		// fallback: 使用 basePrice
+		tierPrice = info.PriceData.ModelPrice
+		if tierPrice <= 0 {
+			tierPrice = info.PriceData.ModelRatio * 2
+		}
+	}
+	if tierPrice <= 0 {
+		return nil
 	}
 
-	// ---- 4) 设 baseline（不含 tierRatio），step 6 乘上 tierRatio 得最终预扣 ----
-	baseline := float64(estTokens) / 1_000_000.0 * pricePerMToken * common.QuotaPerUnit *
-		info.PriceData.GroupRatioInfo.GroupRatio
-	info.PriceData.Quota = int(baseline)
+	// ---- 3) 官方计费公式 ----
+	quota := int(float64(estTokens) / 1_000_000.0 * tierPrice * common.QuotaPerUnit *
+		info.PriceData.GroupRatioInfo.GroupRatio)
+	if quota <= 0 {
+		return nil
+	}
 
-	return map[string]float64{"_st_tier": tierRatio}
+	info.PriceData.Quota = quota
+	// 覆盖 ModelPrice 为分档价格，BillingContext 将携带此值供结算时使用
+	info.PriceData.ModelPrice = tierPrice
+
+	return nil
 }
 
 // -- Seedance 分辨率 / 比例 精确映射 --
@@ -558,7 +568,9 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 // AdjustBillingOnComplete 根据上游实际 total_tokens 多退少补。
-// 公式与预扣一致：total_tokens × modelRatio × groupRatio × tierRatio
+// 公式与预扣一致：total_tokens / 1,000,000 × bc.ModelPrice × QuotaPerUnit × bc.GroupRatio
+//
+// bc.ModelPrice 由 estimateSeedanceBilling 设为分档价格（如 28、46、51、31）。
 func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
 	if taskResult.TotalTokens <= 0 {
 		return 0
@@ -567,13 +579,15 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 	if bc == nil || !isSeedance2Model(bc.OriginModelName) {
 		return 0
 	}
-	tierRatio := 1.0
-	if bc.OtherRatios != nil {
-		if tr, ok := bc.OtherRatios["_st_tier"]; ok && tr > 0 {
-			tierRatio = tr
-		}
+	tierPrice := bc.ModelPrice
+	if tierPrice <= 0 {
+		return 0
 	}
-	quota := int(float64(taskResult.TotalTokens) * bc.ModelRatio * bc.GroupRatio * tierRatio)
+	groupRatio := bc.GroupRatio
+	if groupRatio <= 0 {
+		groupRatio = 1.0
+	}
+	quota := int(float64(taskResult.TotalTokens) / 1_000_000.0 * tierPrice * common.QuotaPerUnit * groupRatio)
 	if quota <= 0 {
 		return 0
 	}

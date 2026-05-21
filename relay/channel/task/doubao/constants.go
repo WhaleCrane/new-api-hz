@@ -45,3 +45,30 @@ func GetResolutionVideoRatio(modelName string) (map[string]float64, bool) {
 	r, ok := resolutionVideoRatioMap[modelName]
 	return r, ok
 }
+
+// seedanceTierPriceMap 官方分档价格（¥/百万tokens）。
+// key 说明: "low"=480p/720p 无视频, "low_video"=480p/720p 有视频,
+//
+//	"high"=1080p 无视频, "high_video"=1080p 有视频。
+//
+// 预扣和结算都直接使用此价格，公式：quota = tokens / 1,000,000 × tierPrice × QuotaPerUnit × groupRatio。
+var seedanceTierPriceMap = map[string]map[string]float64{
+	"doubao-seedance-2-0-260128": {
+		"low":        46.0, // 480p/720p 无视频
+		"low_video":  28.0, // 480p/720p 有视频
+		"high":       51.0, // 1080p 无视频
+		"high_video": 31.0, // 1080p 有视频
+	},
+	"doubao-seedance-2-0-fast-260128": {
+		"low":        37.0, // 480p/720p 无视频
+		"low_video":  22.0, // 480p/720p 有视频
+		"high":       51.0, // 1080p 无视频
+		"high_video": 31.0, // 1080p 有视频
+	},
+}
+
+// GetSeedanceTierPrice 根据模型名获取种子舞官方分档价格映射。
+func GetSeedanceTierPrice(modelName string) (map[string]float64, bool) {
+	m, ok := seedanceTierPriceMap[modelName]
+	return m, ok
+}
