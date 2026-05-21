@@ -218,7 +218,16 @@ func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[st
 		}
 	}
 
-	// ---- 3) 组合倍率 ----
+	// ---- 3) 校验 modelPrice 配置 ----
+	// Seedance 需要 modelPrice 配为每百万 token 单价（如 46）。
+	// 若未配置则走 modelRatio 路径，预扣额会偏小（见 issue），
+	// 但结算 AdjustBillingOnComplete 会按实际 token 纠正。
+	// if !info.PriceData.UsePrice {
+	// 	common.SysError("seedance 模型 " + info.OriginModelName + " 未配置 modelPrice" +
+	// 		"，当前走 modelRatio 路径可能导致预扣不准确")
+	// }
+
+	// ---- 4) 组合倍率 ----
 	// baseQuota = modelPrice × QuotaPerUnit × groupRatio
 	// finalQuota = baseQuota × (estTokens / 1_000_000) × tierRatio
 	combined := float64(estTokens) / 1_000_000.0 * tierRatio
@@ -554,6 +563,24 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	}
 
 	return &taskResult, nil
+}
+
+// AdjustBillingOnComplete 根据上游总 token 数进行准确结算。
+// Seedance 2 系列用 totalTokens × modelRatio × groupRatio，
+// 不重复乘 otherMultiplier（避免 RecalculateTaskQuotaByTokens 中的 double-count）。
+func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
+	if taskResult.TotalTokens <= 0 {
+		return 0
+	}
+	bc := task.PrivateData.BillingContext
+	if bc == nil || !isSeedance2Model(bc.OriginModelName) {
+		return 0
+	}
+	quota := int(float64(taskResult.TotalTokens) * bc.ModelRatio * bc.GroupRatio)
+	if quota <= 0 {
+		return 0
+	}
+	return quota
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error) {
