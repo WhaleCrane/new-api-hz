@@ -165,19 +165,15 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return nil
 }
 
-// seedanceTokenRatioKey 是 estimateSeedanceBilling 返回的 ratio key。
-const seedanceTokenRatioKey = "seedance_token_ratio"
-
-// estimateSeedanceBilling 根据请求参数预估 token 量，返回 token 倍率 × 分档倍率。
+// estimateSeedanceBilling 预扣费：直接按 token 公式计算最终额度。
 //
-// 预扣逻辑：
-//   - 需在管理后台设 modelPrice = 模型每百万 token 的单价（如 46）
-//   - ModelPriceHelperPerCall 算出 baseQuota = modelPrice × QuotaPerUnit × groupRatio
-//   - 本函数返回 ratio = (estTokens / 1_000_000) × tierRatio
-//   - 最终预扣额 = baseQuota × ratio
+// 公式：estTokens / 1_000_000 × pricePerMToken × QuotaPerUnit × groupRatio × tierRatio
 //
-// 预估 token 公式：(width × height × fps × duration) / 1024 × count
-// 分档倍率从 resolutionVideoRatioMap 取值，相对基准价格（480p/720p 无视频）的比率。
+// pricePerMToken 优先取 ModelPrice（¥/百万token），
+// 未配置时 fallback 到 ModelRatio × 2（ratio 1 = ¥2/百万token）。
+//
+// 分档倍率从 resolutionVideoRatioMap 取值（无视频/有视频 × 分辨率）。
+// 返回 nil 跳过 OtherRatios 步骤，直接使用本函数设定的 Quota。
 func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetSeedanceTaskRequest(c)
 	if err != nil {
@@ -218,23 +214,18 @@ func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[st
 		}
 	}
 
-	// ---- 3) 校验 modelPrice 配置 ----
-	// Seedance 需要 modelPrice 配为每百万 token 单价（如 46）。
-	// 若未配置则走 modelRatio 路径，预扣额会偏小（见 issue），
-	// 但结算 AdjustBillingOnComplete 会按实际 token 纠正。
-	// if !info.PriceData.UsePrice {
-	// 	common.SysError("seedance 模型 " + info.OriginModelName + " 未配置 modelPrice" +
-	// 		"，当前走 modelRatio 路径可能导致预扣不准确")
-	// }
-
-	// ---- 4) 组合倍率 ----
-	// baseQuota = modelPrice × QuotaPerUnit × groupRatio
-	// finalQuota = baseQuota × (estTokens / 1_000_000) × tierRatio
-	combined := float64(estTokens) / 1_000_000.0 * tierRatio
-	if combined == 0 {
-		return nil
+	// ---- 3) 直接计算最终预扣额 ----
+	// pricePerMToken: 优先取 ModelPrice（¥/百万token），未配置则 fallback 到 ModelRatio × 2
+	pricePerMToken := info.PriceData.ModelPrice
+	if pricePerMToken <= 0 {
+		pricePerMToken = info.PriceData.ModelRatio * 2
 	}
-	return map[string]float64{seedanceTokenRatioKey: combined}
+	quota := int(float64(estTokens) / 1_000_000.0 * pricePerMToken * common.QuotaPerUnit *
+		info.PriceData.GroupRatioInfo.GroupRatio * tierRatio)
+	if quota > 0 {
+		info.PriceData.Quota = quota
+	}
+	return nil // 跳过 relay_task.go 步骤 6 的 OtherRatios 乘法
 }
 
 // -- Seedance 分辨率 / 比例 精确映射 --
