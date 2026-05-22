@@ -117,7 +117,7 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
-	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit || isSeedance2Model(info.OriginModelName) {
 		return relaycommon.ValidateSeedanceTaskRequest(c, info)
 	}
 	// Accept only POST /v1/video/generations as "generate" action.
@@ -137,11 +137,15 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	return nil
 }
 
-// EstimateBilling 检测视频输入和分辨率，返回四档 OtherRatio。
-// 档位：low(480p/720p无视频)、high(1080p无视频)、low_video(480p/720p有视频)、high_video(1080p有视频)。
-// 基准档（low）不返回 OtherRatio，其余档返回 {"video_resolution_input": ratio}。
+// isSeedance2Model 判断是否为 doubao-seedance-2 系列模型。
+func isSeedance2Model(modelName string) bool {
+	return strings.HasPrefix(modelName, "doubao-seedance-2")
+}
+
+// EstimateBilling 检测视频输入和分辨率，返回预扣倍率。
+// Seedance 2 系列模型走 token 预估计费，其余 doubao 视频走四档分辨率倍率。
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
-	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit || isSeedance2Model(info.OriginModelName) {
 		return estimateSeedanceBilling(c, info)
 	}
 	// 标准格式路径：仅检测 metadata 中的 video_url（不含分辨率信息）
@@ -161,31 +165,126 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return nil
 }
 
-// estimateSeedanceBilling 处理 Seedance 2.0 官方格式的四档计费。
+// estimateSeedanceBilling 预扣费，直接使用官方分档价格（¥/百万tokens）：
+//
+//	quota = tokens / 1,000,000 × tierPrice × QuotaPerUnit × groupRatio
+//
+// tierPrice 来自 seedanceTierPriceMap（如 480p/720p 无视频 = 46 元/百万tokens）。
+// 覆盖 info.PriceData.ModelPrice 为 tierPrice，供 BillingContext 记录并在结算时使用。
+//
+// 不再返回 OtherRatios，不经过 step 6 乘算，直接设置 info.PriceData.Quota。
 func estimateSeedanceBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetSeedanceTaskRequest(c)
 	if err != nil {
 		return nil
 	}
 
-	ratioMap, ok := GetResolutionVideoRatio(info.OriginModelName)
-	if !ok {
+	// ---- 1) 计算预估 token ----
+	resolution := req.Resolution
+	if resolution == "" {
+		resolution = "720p"
+	}
+	aspectRatio := req.Ratio
+	if aspectRatio == "" {
+		aspectRatio = "16:9"
+	}
+	duration := 4
+	if req.Duration != nil && int(*req.Duration) > 0 {
+		duration = int(*req.Duration)
+	}
+	fps := 24
+	if req.Frames != nil && int(*req.Frames) > 0 {
+		fps = int(*req.Frames)
+	}
+
+	width, height := resolveSeedanceDimensions(resolution, aspectRatio)
+	estTokens := (width * height * fps * duration) / 1024
+	if estTokens <= 0 {
 		return nil
 	}
 
+	// ---- 2) 直接获取分档价格（¥/百万tokens） ----
 	hasVideo := req.HasVideo()
-	tier := resolveResolutionTier(req.Resolution)
-
+	tier := resolveResolutionTier(resolution)
 	key := tierKey(hasVideo, tier)
-	if key == "low" {
-		// 基准档（480p/720p 无视频），不应用额外倍率
+
+	tierPrice := 0.0
+	if priceMap, ok := GetSeedanceTierPrice(info.OriginModelName); ok {
+		if p, ok := priceMap[key]; ok {
+			tierPrice = p
+		}
+	}
+	if tierPrice <= 0 {
+		// fallback: 使用 basePrice
+		tierPrice = info.PriceData.ModelPrice
+		if tierPrice <= 0 {
+			tierPrice = info.PriceData.ModelRatio * 2
+		}
+	}
+	if tierPrice <= 0 {
 		return nil
 	}
 
-	if ratio, ok := ratioMap[key]; ok {
-		return map[string]float64{"video_resolution_input": ratio}
+	// ---- 3) 官方计费公式 ----
+	quota := int(float64(estTokens) / 1_000_000.0 * tierPrice * common.QuotaPerUnit *
+		info.PriceData.GroupRatioInfo.GroupRatio)
+	if quota <= 0 {
+		return nil
 	}
+
+	info.PriceData.Quota = quota
+	// 覆盖 ModelPrice 为分档价格，BillingContext 将携带此值供结算时使用
+	info.PriceData.ModelPrice = tierPrice
+
 	return nil
+}
+
+// -- Seedance 分辨率 / 比例 精确映射 --
+
+// seedanceDimensions 表：Seedance 官方精确分辨率映射。
+// 注意 3:4 和 9:16 分别是 4:3 和 16:9 的竖屏版本（宽高互换）。
+var seedanceDimensions = map[string]map[string][2]int{
+	"480p": {
+		"21:9": {992, 432},
+		"16:9": {864, 496},
+		"4:3":  {752, 560},
+		"1:1":  {640, 640},
+		"3:4":  {560, 752},
+		"9:16": {496, 864},
+	},
+	"720p": {
+		"21:9": {1470, 630},
+		"16:9": {1280, 720},
+		"4:3":  {1112, 834},
+		"1:1":  {960, 960},
+		"3:4":  {834, 1112},
+		"9:16": {720, 1280},
+	},
+	"1080p": {
+		"21:9": {2206, 946},
+		"16:9": {1920, 1080},
+		"4:3":  {1664, 1248},
+		"1:1":  {1440, 1440},
+		"3:4":  {1248, 1664},
+		"9:16": {1080, 1920},
+	},
+}
+
+// resolveSeedanceDimensions 根据 resolution 和 aspectRatio 查表获取确切宽高。
+// 不存在的组合返回 720p 16:9 默认值。
+func resolveSeedanceDimensions(resolution, aspectRatio string) (width, height int) {
+	res := strings.ToLower(strings.TrimSpace(resolution))
+	ratio := aspectRatio
+	if ratio == "" {
+		ratio = "16:9"
+	}
+	if resMap, ok := seedanceDimensions[res]; ok {
+		if dim, ok := resMap[ratio]; ok {
+			return dim[0], dim[1]
+		}
+	}
+	// fallback 默认 720p 16:9
+	return 1280, 720
 }
 
 // resolutionTier 分辨率档位。
@@ -276,7 +375,7 @@ func hasVideoInMetadata(metadata map[string]interface{}) bool {
 
 // BuildRequestBody converts request into Doubao specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
-	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit {
+	if info.RelayMode == relayconstant.RelayModeSeedanceSubmit || isSeedance2Model(info.OriginModelName) {
 		return a.buildSeedanceRequestBody(c, info)
 	}
 	return a.buildStandardRequestBody(c, info)
@@ -466,6 +565,33 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	}
 
 	return &taskResult, nil
+}
+
+// AdjustBillingOnComplete 根据上游实际 total_tokens 多退少补。
+// 公式与预扣一致：total_tokens / 1,000,000 × bc.ModelPrice × QuotaPerUnit × bc.GroupRatio
+//
+// bc.ModelPrice 由 estimateSeedanceBilling 设为分档价格（如 28、46、51、31）。
+func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
+	if taskResult.TotalTokens <= 0 {
+		return 0
+	}
+	bc := task.PrivateData.BillingContext
+	if bc == nil || !isSeedance2Model(bc.OriginModelName) {
+		return 0
+	}
+	tierPrice := bc.ModelPrice
+	if tierPrice <= 0 {
+		return 0
+	}
+	groupRatio := bc.GroupRatio
+	if groupRatio <= 0 {
+		groupRatio = 1.0
+	}
+	quota := int(float64(taskResult.TotalTokens) / 1_000_000.0 * tierPrice * common.QuotaPerUnit * groupRatio)
+	if quota <= 0 {
+		return 0
+	}
+	return quota
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error) {

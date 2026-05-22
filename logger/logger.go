@@ -140,8 +140,8 @@ func LogQuota(quota int) string {
 		return fmt.Sprintf("%s%.6f 额度", symbol, v)
 	case operation_setting.QuotaDisplayTypeTokens:
 		return fmt.Sprintf("%d 点额度", quota)
-	default: // USD
-		return fmt.Sprintf("＄%.6f 额度", q/common.QuotaPerUnit)
+	default: // CNY (default)
+		return fmt.Sprintf("¥%.6f 额度", q/common.QuotaPerUnit)
 	}
 }
 
@@ -165,8 +165,8 @@ func FormatQuota(quota int) string {
 		return fmt.Sprintf("%s%.6f", symbol, v)
 	case operation_setting.QuotaDisplayTypeTokens:
 		return fmt.Sprintf("%d", quota)
-	default:
-		return fmt.Sprintf("＄%.6f", q/common.QuotaPerUnit)
+	default: // CNY (default)
+		return fmt.Sprintf("¥%.6f", q/common.QuotaPerUnit)
 	}
 }
 

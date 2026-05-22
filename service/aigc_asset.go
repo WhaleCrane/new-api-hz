@@ -7,14 +7,14 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
-// resolveAIGCChannelForUser 获取平台默认 VolcEngine channel（type=45）和用户的 project name
+// resolveAIGCChannelForUser 获取平台默认 VolcEngineAIGC channel 和用户的 project name
 func resolveAIGCChannelForUser(userId int) (*model.Channel, string, error) {
 	mapping, err := model.GetUserAIGCAssetGroupMapping(userId)
 	if err != nil {
 		return nil, "", fmt.Errorf("query user mapping failed: %w", err)
 	}
 	if mapping == nil || mapping.ChannelId == 0 {
-		// 用户尚未绑定，尝试获取平台第一个可用的 VolcEngine channel
+		// 用户尚未绑定，尝试获取平台第一个可用的 VolcEngineAIGC channel
 		var channels []*model.Channel
 		err := model.DB.Where("type = ? and status = ? limit 1", 45, 1).Find(&channels).Error
 		if err != nil || len(channels) == 0 {

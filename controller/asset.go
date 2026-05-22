@@ -179,7 +179,7 @@ func UpdateAssetGroup(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
-	resp, err := service.UpdateAssetGroup(c.Request.Context(), userId, req.ID, req.Name, req.Description)
+	resp, err := service.UpdateAssetGroup(c.Request.Context(), userId, req.ID, req.Name, req.Title, req.Description)
 	if err != nil {
 		common.ApiError(c, err)
 		return

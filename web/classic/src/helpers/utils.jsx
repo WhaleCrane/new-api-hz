@@ -615,7 +615,7 @@ export const calculateModelPrice = ({
   tokenUnit,
   displayPrice,
   currency,
-  quotaDisplayType = 'USD',
+  quotaDisplayType = 'CNY',
   precision = 4,
 }) => {
   // 1. 选择实际使用的分组
@@ -774,7 +774,7 @@ export const calculateModelPrice = ({
 export const getModelPriceItems = (
   priceData,
   t,
-  quotaDisplayType = 'USD',
+  quotaDisplayType = 'CNY',
 ) => {
   if (priceData.isDynamicPricing) {
     return [
@@ -900,8 +900,8 @@ export const getModelPriceItems = (
 export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
   if (!billingExpr) return <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>;
 
-  const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
-  let symbol = '$';
+  const quotaDisplayType = localStorage.getItem('quota_display_type') || 'CNY';
+  let symbol = '¥';
   let rate = 1;
   try {
     const s = JSON.parse(localStorage.getItem('status') || '{}');

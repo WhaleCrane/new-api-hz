@@ -107,6 +107,7 @@ type GetAssetGroupReq struct {
 type UpdateAssetGroupReq struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
+	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 

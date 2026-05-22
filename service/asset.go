@@ -405,7 +405,7 @@ func GetAssetGroup(ctx context.Context, userId int, id string) (map[string]any, 
 }
 
 // UpdateAssetGroup 更新素材组
-func UpdateAssetGroup(ctx context.Context, userId int, id, name, description string) (map[string]any, error) {
+func UpdateAssetGroup(ctx context.Context, userId int, id, name, title, description string) (map[string]any, error) {
 	channel, projectName, err := resolveChannelForUser(userId)
 	if err != nil {
 		return nil, err
@@ -416,6 +416,9 @@ func UpdateAssetGroup(ctx context.Context, userId int, id, name, description str
 	}
 	if name != "" {
 		reqBody["Name"] = name
+	}
+	if title != "" {
+		reqBody["Title"] = title
 	}
 	if description != "" {
 		reqBody["Description"] = description
