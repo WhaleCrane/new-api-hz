@@ -45,6 +45,7 @@ const (
 
 	RelayModeSeedanceSubmit
 	RelayModeSeedanceFetchByID
+	RelayModeSeedanceCancelByID
 
 	RelayModeRerank
 

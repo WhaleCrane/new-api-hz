@@ -38,6 +38,7 @@ const (
 	TaskStatusInProgress            = "IN_PROGRESS"
 	TaskStatusFailure               = "FAILURE"
 	TaskStatusSuccess               = "SUCCESS"
+	TaskStatusCancelled             = "CANCELLED"
 	TaskStatusUnknown               = "UNKNOWN"
 )
 

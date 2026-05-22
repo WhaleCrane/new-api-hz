@@ -274,6 +274,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		} else if c.Request.Method == http.MethodGet {
 			relayMode = relayconstant.RelayModeSeedanceFetchByID
 			shouldSelectChannel = false
+		} else if c.Request.Method == http.MethodDelete {
+			relayMode = relayconstant.RelayModeSeedanceCancelByID
+			shouldSelectChannel = false
 		}
 		if _, ok := c.Get("relay_mode"); !ok {
 			c.Set("relay_mode", relayMode)

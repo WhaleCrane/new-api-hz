@@ -39,6 +39,7 @@ func SetVideoRouter(router *gin.Engine) {
 		{
 			videoS1Router.POST("/video/generations", controller.RelayTask)
 			videoS1Router.GET("/video/generations/:task_id", controller.RelayTaskFetch)
+			videoS1Router.DELETE("/video/generations/:task_id", controller.RelayTaskCancel)
 		}
 	}
 
