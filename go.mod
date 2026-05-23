@@ -61,6 +61,8 @@ require (
 	gorm.io/gorm v1.25.2
 )
 
+require github.com/waffo-com/waffo-pancake-sdk-go v0.2.0
+
 require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
