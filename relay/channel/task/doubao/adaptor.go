@@ -485,6 +485,25 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
+// CancelTask cancel or delete a video generation task
+func (a *TaskAdaptor) CancelTask(baseURL, key, taskID, proxy string) (*http.Response, error) {
+	uri := fmt.Sprintf("%s/api/v3/contents/generations/tasks/%s", baseURL, taskID)
+
+	req, err := http.NewRequest(http.MethodDelete, uri, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	client, err := service.GetHttpClientWithProxy(proxy)
+	if err != nil {
+		return nil, fmt.Errorf("new proxy http client failed: %w", err)
+	}
+	return client.Do(req)
+}
+
 func (a *TaskAdaptor) GetModelList() []string {
 	return ModelList
 }

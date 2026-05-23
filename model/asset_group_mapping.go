@@ -41,6 +41,24 @@ func GetUserAssetGroupMapping(userId int) (*AssetGroupMapping, error) {
 	return mapping, nil
 }
 
+// GetAssetGroupMapping 按 user_id + group_id 查询映射（用于判重）
+func GetAssetGroupMapping(userId int, groupId string) (*AssetGroupMapping, error) {
+	mapping := &AssetGroupMapping{}
+	err := DB.Where("user_id = ? AND group_id = ?", userId, groupId).First(mapping).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return mapping, nil
+}
+
+// DeleteAssetGroupMapping 删除用户与 Asset Group 的映射
+func DeleteAssetGroupMapping(userId int, groupId string) error {
+	return DB.Where("user_id = ? AND group_id = ?", userId, groupId).Delete(&AssetGroupMapping{}).Error
+}
+
 // InsertAssetGroupMapping 插入用户映射
 func InsertAssetGroupMapping(mapping *AssetGroupMapping) error {
 	return DB.Create(mapping).Error

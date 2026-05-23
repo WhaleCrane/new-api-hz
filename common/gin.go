@@ -110,11 +110,29 @@ func UnmarshalBodyReusable(c *gin.Context, v any) error {
 	if err != nil {
 		return err
 	}
+	contentType := c.Request.Header.Get("Content-Type")
+
+	// disk-backed JSON: stream-decode directly from the file to avoid
+	// materializing the entire payload back into a transient []byte
+	// (diskStorage.Bytes() would ReadFull the whole file into the heap).
+	if storage.IsDisk() && strings.HasPrefix(contentType, "application/json") {
+		if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {
+			return seekErr
+		}
+		if err := DecodeJson(storage, v); err != nil {
+			return err
+		}
+		if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {
+			return seekErr
+		}
+		c.Request.Body = io.NopCloser(storage)
+		return nil
+	}
+
 	requestBody, err := storage.Bytes()
 	if err != nil {
 		return err
 	}
-	contentType := c.Request.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "application/json") {
 		err = Unmarshal(requestBody, v)
 	} else if strings.Contains(contentType, gin.MIMEPOSTForm) {
@@ -218,6 +236,31 @@ func ApiSuccessI18n(c *gin.Context, key string, data any, args ...map[string]any
 		"message": msg,
 		"data":    data,
 	})
+}
+
+// ShouldBindJSONOptional binds JSON from request body if present.
+// Returns nil if body is empty or {} — all fields are optional.
+func ShouldBindJSONOptional(c *gin.Context, v any) error {
+	if c.Request.ContentLength == 0 {
+		return nil
+	}
+	storage, err := GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || string(trimmed) == "{}" {
+		return nil
+	}
+	_, err = storage.Seek(0, io.SeekStart)
+	if err != nil {
+		return err
+	}
+	return UnmarshalBodyReusable(c, v)
 }
 
 // TranslateMessage is a helper function that calls i18n.T

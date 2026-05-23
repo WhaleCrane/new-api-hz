@@ -27,7 +27,7 @@ func CreateAIGCAssetGroup(c *gin.Context) {
 // ListAIGCAssetGroups 查询素材资产组合列表
 func ListAIGCAssetGroups(c *gin.Context) {
 	var req dto.ListAIGCAssetGroupsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := common.ShouldBindJSONOptional(c, &req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -113,7 +113,7 @@ func CreateAIGCAsset(c *gin.Context) {
 // ListAIGCAssets 查询素材资产列表
 func ListAIGCAssets(c *gin.Context) {
 	var req dto.ListAIGCAssetsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := common.ShouldBindJSONOptional(c, &req); err != nil {
 		common.ApiError(c, err)
 		return
 	}

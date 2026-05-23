@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
+	taskdoubao "github.com/QuantumNous/new-api/relay/channel/task/doubao"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -308,6 +309,34 @@ func RelayTaskFetch(c *gin.Context, relayMode int) (taskResp *dto.TaskError) {
 	return
 }
 
+var cancelRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){
+	relayconstant.RelayModeSeedanceCancelByID: videoCancelRespBodyBuilder,
+}
+
+func RelayTaskCancel(c *gin.Context, relayMode int) (taskResp *dto.TaskError) {
+	respBuilder, ok := cancelRespBuilders[relayMode]
+	if !ok {
+		taskResp = service.TaskErrorWrapperLocal(errors.New("invalid_relay_mode"), "invalid_relay_mode", http.StatusBadRequest)
+		return
+	}
+
+	respBody, taskErr := respBuilder(c)
+	if taskErr != nil {
+		return taskErr
+	}
+	if len(respBody) == 0 {
+		respBody = []byte("{\"code\":\"success\",\"data\":null}")
+	}
+
+	c.Writer.Header().Set("Content-Type", "application/json")
+	_, err := io.Copy(c.Writer, bytes.NewBuffer(respBody))
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "copy_response_body_failed", http.StatusInternalServerError)
+		return
+	}
+	return
+}
+
 func sunoFetchRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
 	userId := c.GetInt("id")
 	var condition = struct {
@@ -378,6 +407,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
+	format := c.Query("format")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -386,7 +416,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
-	if isOpenAIVideoAPI {
+	if isOpenAIVideoAPI && format != "ni" {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
@@ -405,14 +435,103 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	// 通用 TaskDto 格式
-	respBody, err = common.Marshal(dto.TaskResponse[any]{
-		Code: "success",
-		Data: TaskModel2Dto(originTask),
-	})
-	if err != nil {
-		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+	// format=ni：new-api 任务数据 + 上游原始响应，明确区分
+	if format == "ni" {
+		respBody, err = common.Marshal(dto.TaskResponse[any]{
+			Code:    "success",
+			Message: "",
+			Data: gin.H{
+				"ni":       TaskModel2Dto(originTask),
+				"upstream": originTask.Data,
+			},
+		})
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+		}
+		return
 	}
+
+	// 默认：只返回上游原始响应体
+	respBody = originTask.Data
+	return
+}
+
+func videoCancelRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
+	taskId := c.Param("task_id")
+	if taskId == "" {
+		taskId = c.GetString("task_id")
+	}
+	userId := c.GetInt("id")
+
+	originTask, exist, err := model.GetByTaskId(userId, taskId)
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "get_task_failed", http.StatusInternalServerError)
+		return
+	}
+	if !exist {
+		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
+		return
+	}
+
+	// running 状态不支持取消/删除
+	if originTask.Status == model.TaskStatusInProgress {
+		taskResp = service.TaskErrorWrapperLocal(errors.New("task_running_cannot_cancel"), "task_running_cannot_cancel", http.StatusBadRequest)
+		return
+	}
+
+	// 已取消的任务重复操作
+	if originTask.Status == model.TaskStatusCancelled {
+		taskResp = service.TaskErrorWrapperLocal(errors.New("task_already_cancelled"), "task_already_cancelled", http.StatusBadRequest)
+		return
+	}
+
+	channelModel, err := model.GetChannelById(originTask.ChannelId, true)
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "get_channel_failed", http.StatusInternalServerError)
+		return
+	}
+
+	adaptor := GetTaskAdaptor(originTask.Platform)
+	if adaptor == nil {
+		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid_channel_id:%d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
+		return
+	}
+
+	// 只有 doubao  adaptor 实现了 CancelTask
+	doubaoAdaptor, ok := adaptor.(*taskdoubao.TaskAdaptor)
+	if !ok {
+		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("cancel_not_supported:%s", originTask.Platform), "cancel_not_supported", http.StatusNotImplemented)
+		return
+	}
+
+	baseURL := channelModel.GetBaseURL()
+	if baseURL == "" {
+		baseURL = constant.ChannelBaseURLs[channelModel.Type]
+	}
+	proxy := channelModel.GetSetting().Proxy
+
+	httpResp, err := doubaoAdaptor.CancelTask(baseURL, channelModel.Key, taskId, proxy)
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "cancel_task_request_failed", http.StatusInternalServerError)
+		return
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("upstream_error:%s", string(bodyBytes)), "upstream_error", httpResp.StatusCode)
+		return
+	}
+
+	// queued 状态被取消，退还 quota
+	if originTask.Status == model.TaskStatusQueued {
+		service.RefundTaskQuota(c, originTask, "任务已取消")
+		_ = model.TaskBulkUpdateByID([]int64{originTask.ID}, map[string]any{
+			"status": model.TaskStatusCancelled,
+		})
+	}
+
+	respBody = []byte(`{"code":"success","message":"","data":null}`)
 	return
 }
 
