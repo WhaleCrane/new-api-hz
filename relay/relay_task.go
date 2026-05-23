@@ -415,8 +415,14 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
+	// format=upstream：直接透传上游原始响应体，不做包装
+	if format == "upstream" {
+		respBody = originTask.Data
+		return
+	}
+
 	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
-	if isOpenAIVideoAPI && format != "ni" {
+	if isOpenAIVideoAPI {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
@@ -435,25 +441,14 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	// format=ni：new-api 任务数据 + 上游原始响应，明确区分
-	if format == "ni" {
-		respBody, err = common.Marshal(dto.TaskResponse[any]{
-			Code:    "success",
-			Message: "",
-			Data: gin.H{
-				"ni":       TaskModel2Dto(originTask),
-				"upstream": originTask.Data,
-			},
-		})
-		if err != nil {
-			taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
-		}
-		return
+	// 默认：返回 new-api 标准格式
+	respBody, err = common.Marshal(dto.TaskResponse[any]{
+		Code: "success",
+		Data: TaskModel2Dto(originTask),
+	})
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
-
-	// 默认：只返回上游原始响应体
-	respBody = originTask.Data
-	return
 }
 
 func videoCancelRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
