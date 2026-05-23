@@ -449,6 +449,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	if err != nil {
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
+	return
 }
 
 func videoCancelRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
