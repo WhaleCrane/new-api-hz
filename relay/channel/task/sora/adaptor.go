@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -130,6 +131,12 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	parsedURL, err := url.Parse(a.baseURL)
+	if err == nil && parsedURL.Path != "" && parsedURL.Path != "/" {
+		// base URL 已包含路径后缀 -> 直接使用完整地址
+		return a.baseURL, nil
+	}
+	// base URL 是域名根地址 -> 追加默认路径
 	if info.Action == constant.TaskActionRemix {
 		return fmt.Sprintf("%s/v1/videos/%s/remix", a.baseURL, info.OriginTaskID), nil
 	}
